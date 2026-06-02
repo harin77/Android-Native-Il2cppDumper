@@ -22,3 +22,28 @@ add_library(dumper SHARED
 
 target_link_libraries(dumper android log)
 target_include_directories(dumper PRIVATE ${CMAKE_SOURCE_DIR}/core)
+
+# Build type specific configurations
+if(CMAKE_BUILD_TYPE STREQUAL "Release")
+    # Strip debug symbols
+    target_link_options(dumper PRIVATE -s)
+
+    # Optimization for size
+    target_compile_options(dumper PRIVATE -Oz)
+
+    # Remove unused sections
+    target_compile_options(dumper PRIVATE -ffunction-sections -fdata-sections)
+    target_link_options(dumper PRIVATE -Wl,--gc-sections)
+
+    # Hide internal symbols
+    target_compile_options(dumper PRIVATE -fvisibility=hidden)
+
+    # Remove RPATH
+    set_target_properties(dumper PROPERTIES
+        BUILD_WITH_INSTALL_RPATH FALSE
+        INSTALL_RPATH ""
+    )
+else()
+    # Debug build: keep symbols, no optimization
+    target_compile_options(dumper PRIVATE -O0 -g)
+endif()

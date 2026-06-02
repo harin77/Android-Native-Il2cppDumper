@@ -210,19 +210,13 @@ std::pair<std::string, std::string> Il2CppExecutor::getMethodSpecName(const Il2C
 
 Il2CppTypeDefinition Il2CppExecutor::getTypeDefinitionFromIl2CppType(const Il2CppType& il2CppType) {
     if (il2Cpp.version >= 27 && il2Cpp.isDumped) {
-        auto offset = il2CppType.typeHandle() - metadata.imageBase - metadata.header.typeDefinitionsOffset;
-        auto idx = offset / metadata.sizeOfStruct<Il2CppTypeDefinition>();
+        auto handle = il2CppType.typeHandle();
+        auto base = metadata.imageBase + metadata.header.typeDefinitionsOffset;
+        if (handle < base) return {};
+        auto offset = handle - base;
+        auto idx = static_cast<int64_t>(offset / metadata.sizeOfStruct<Il2CppTypeDefinition>());
         if (idx >= 0 && static_cast<size_t>(idx) < metadata.typeDefs.size())
             return metadata.typeDefs[idx];
-        else {
-            static int errCount = 0;
-            if (errCount < 3) {
-                LOGE("getTypeDefFromType: offset=0x%llx, idx=%lld, typeDefs.size=%zu, imageBase=0x%llx",
-                     (unsigned long long)offset, (long long)idx, metadata.typeDefs.size(),
-                     (unsigned long long)metadata.imageBase);
-                errCount++;
-            }
-        }
     } else {
         auto idx = il2CppType.klassIndex();
         if (idx >= 0 && static_cast<size_t>(idx) < metadata.typeDefs.size())
@@ -233,8 +227,11 @@ Il2CppTypeDefinition Il2CppExecutor::getTypeDefinitionFromIl2CppType(const Il2Cp
 
 Il2CppGenericParameter Il2CppExecutor::getGenericParameterFromIl2CppType(const Il2CppType& il2CppType) {
     if (il2Cpp.version >= 27 && il2Cpp.isDumped) {
-        auto offset = il2CppType.genericParameterHandle() - metadata.imageBase - metadata.header.genericParametersOffset;
-        auto idx = offset / metadata.sizeOfStruct<Il2CppGenericParameter>();
+        auto handle = il2CppType.genericParameterHandle();
+        auto base = metadata.imageBase + metadata.header.genericParametersOffset;
+        if (handle < base) return {};
+        auto offset = handle - base;
+        auto idx = static_cast<int64_t>(offset / metadata.sizeOfStruct<Il2CppGenericParameter>());
         if (idx >= 0 && static_cast<size_t>(idx) < metadata.genericParameters.size())
             return metadata.genericParameters[idx];
     } else {

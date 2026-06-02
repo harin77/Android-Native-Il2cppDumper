@@ -197,7 +197,7 @@ void StructGenerator::writeScript(const std::string& outputDir) {
 }
 
 // Simplified implementations for remaining methods
-std::string StructGenerator::parseType(const Il2CppType& il2CppType, const Il2CppGenericContext* /*context*/) {
+std::string StructGenerator::parseType(const Il2CppType& il2CppType, const Il2CppGenericContext* context) {
     switch (il2CppType.type) {
         case Il2CppTypeEnum::IL2CPP_TYPE_VOID: return "void";
         case Il2CppTypeEnum::IL2CPP_TYPE_BOOLEAN: return "bool";
@@ -251,7 +251,7 @@ std::string StructGenerator::parseType(const Il2CppType& il2CppType, const Il2Cp
     }
 }
 
-std::string StructGenerator::getIl2CppStructName(const Il2CppType& il2CppType, const Il2CppGenericContext* /*context*/) {
+std::string StructGenerator::getIl2CppStructName(const Il2CppType& il2CppType, const Il2CppGenericContext* context) {
     switch (il2CppType.type) {
         case Il2CppTypeEnum::IL2CPP_TYPE_VALUETYPE:
         case Il2CppTypeEnum::IL2CPP_TYPE_CLASS: {
@@ -271,7 +271,7 @@ std::string StructGenerator::getIl2CppStructName(const Il2CppType& il2CppType, c
     }
 }
 
-bool StructGenerator::isValueType(const Il2CppType& il2CppType, const Il2CppGenericContext* /*context*/) {
+bool StructGenerator::isValueType(const Il2CppType& il2CppType, const Il2CppGenericContext* context) {
     if (il2CppType.type == Il2CppTypeEnum::IL2CPP_TYPE_VALUETYPE) {
         auto typeDef = executor.getTypeDefinitionFromIl2CppType(il2CppType);
         return !typeDef.isEnum();
@@ -279,7 +279,7 @@ bool StructGenerator::isValueType(const Il2CppType& il2CppType, const Il2CppGene
     return false;
 }
 
-bool StructGenerator::isCustomType(const Il2CppType& il2CppType, const Il2CppGenericContext* /*context*/) {
+bool StructGenerator::isCustomType(const Il2CppType& il2CppType, const Il2CppGenericContext* context) {
     switch (il2CppType.type) {
         case Il2CppTypeEnum::IL2CPP_TYPE_STRING:
         case Il2CppTypeEnum::IL2CPP_TYPE_CLASS:

@@ -8,6 +8,7 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.ExpandLess
 import androidx.compose.material.icons.filled.ExpandMore
@@ -17,6 +18,7 @@ import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
@@ -26,6 +28,7 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.unit.dp
 import com.il2cpp.dumper.viewmodel.DumpConfig
 
@@ -96,6 +99,24 @@ fun ConfigPanel(
                     }
                     ConfigSwitch("Force Dump", config.forceDump) {
                         onConfigChange(config.copy(forceDump = it))
+                    }
+                    ConfigSwitch("Force Il2Cpp Version", config.forceIl2CppVersion) {
+                        onConfigChange(config.copy(forceIl2CppVersion = it))
+                    }
+                    AnimatedVisibility(visible = config.forceIl2CppVersion) {
+                        OutlinedTextField(
+                            value = config.forceVersion.toString(),
+                            onValueChange = { value ->
+                                val v = value.toDoubleOrNull() ?: return@OutlinedTextField
+                                onConfigChange(config.copy(forceVersion = v))
+                            },
+                            label = { Text("Il2Cpp Version") },
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .padding(start = 16.dp, top = 4.dp, bottom = 4.dp),
+                            singleLine = true,
+                            keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal)
+                        )
                     }
                 }
             }
