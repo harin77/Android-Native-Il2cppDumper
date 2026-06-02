@@ -1,0 +1,58 @@
+SPRINGMUSK NON-COMMERCIAL LICENSE
+
+Copyright (c) 2024-2026 springmusk (https://github.com/springmusk026)
+
+PERMISSION IS HEREBY GRANTED, free of charge, to any person obtaining a copy
+of this software and associated documentation files (the "Software"), to use,
+copy, modify, merge, publish, distribute, sublicense, and/or sell copies of
+the Software, and to permit persons to whom the Software is furnished to do
+so, subject to the following conditions:
+
+1. ATTRIBUTION REQUIREMENT
+   All copies, modified versions, derivative works, and redistributions of
+   this Software must retain the following:
+   a) This copyright notice and license in its entirety.
+   b) The original author's name "springmusk" prominently displayed in the
+      application's About/Credits screen, documentation, and any public
+      distribution.
+   c) The original project name "Il2CPP Dumper" and a link to the original
+      repository (https://github.com/springmusk026/Android-Native-Il2cppDumper).
+   d) Credit to the original upstream project "Il2CppDumper by Perfare"
+      (https://github.com/perfare/Il2CppDumper).
+
+2. NON-COMMERCIAL USE ONLY
+   This Software may NOT be used, in whole or in part, for any commercial
+   purpose. This includes but is not limited to:
+   a) Selling the Software or any derivative work.
+   b) Offering the Software as part of a paid product, subscription service,
+      or software-as-a-service (SaaS) offering.
+   c) Including the Software in any product that generates revenue through
+      advertisements, in-app purchases, paywalls, freemium models, or any
+      other monetization mechanism.
+   d) Using the Software to provide paid consulting, support, or services
+      where the Software itself is the primary deliverable.
+   e) Distributing the Software through commercial app stores where it is
+      sold or bundled with paid software.
+
+3. FREE DISTRIBUTION ONLY
+   Any redistribution of this Software, modified or unmodified, must be
+   provided free of charge. The Software must not be placed behind any
+   paywall, login wall, subscription gate, or advertisement wall.
+
+4. NO REMOVAL OF CREDITS
+   The original author's credits, copyright notices, branding, and
+   attribution must not be removed, obscured, or altered in any way from
+   the Software, its source code, its user interface, or its documentation.
+
+5. NOTICE
+   Any modified version of this Software must be clearly marked as such,
+   with a notice indicating what changes were made and by whom. Modified
+   versions must not be represented as the original Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+SOFTWARE.
