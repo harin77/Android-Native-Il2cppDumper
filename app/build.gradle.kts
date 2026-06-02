@@ -3,7 +3,7 @@ plugins {
     id("org.jetbrains.kotlin.plugin.compose")
     alias(libs.plugins.ksp)
     alias(libs.plugins.kotlin.serialization)
-    alias(libs.plugins.aboutlibraries) apply false
+    alias(libs.plugins.aboutlibraries)
 }
 
 android {
