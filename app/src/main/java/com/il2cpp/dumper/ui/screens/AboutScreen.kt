@@ -17,10 +17,13 @@ import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Code
+import androidx.compose.material.icons.filled.Balance
 import androidx.compose.material.icons.filled.ContentCopy
 import androidx.compose.material.icons.filled.Description
 import androidx.compose.material.icons.filled.OpenInNew
 import androidx.compose.material.icons.filled.Person
+import androidx.compose.material.icons.filled.Security
+import androidx.compose.material.icons.filled.VolunteerActivism
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.Card
@@ -179,6 +182,41 @@ fun AboutScreen(
                 }
             }
 
+            // License
+            SectionTitle("License")
+            Card(modifier = Modifier.fillMaxWidth()) {
+                Column(modifier = Modifier.padding(16.dp)) {
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Icon(
+                            imageVector = Icons.Default.Balance,
+                            contentDescription = null,
+                            tint = MaterialTheme.colorScheme.primary,
+                            modifier = Modifier.size(20.dp)
+                        )
+                        Spacer(modifier = Modifier.width(12.dp))
+                        Text(
+                            text = "Springmusk Non-Commercial License",
+                            style = MaterialTheme.typography.titleSmall,
+                            fontWeight = FontWeight.Bold
+                        )
+                    }
+                    Spacer(modifier = Modifier.height(8.dp))
+                    LicenseRow(Icons.Default.VolunteerActivism, "Free to use, modify, and redistribute")
+                    LicenseRow(Icons.Default.Person, "Attribution to springmusk must be retained")
+                    LicenseRow(Icons.Default.Security, "No commercial use, ads, or subscriptions")
+                    LicenseRow(Icons.Default.Description, "Must be distributed free of charge")
+                    Spacer(modifier = Modifier.height(8.dp))
+                    Text(
+                        text = "View full license on GitHub",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.primary,
+                        modifier = Modifier.clickable {
+                            context.startActivity(Intent(Intent.ACTION_VIEW, Uri.parse("https://github.com/springmusk026/Android-Native-Il2cppDumper/blob/main/LICENSE")))
+                        }
+                    )
+                }
+            }
+
             // Open Source Licenses
             SectionTitle("Legal")
             Card(modifier = Modifier.fillMaxWidth()) {
@@ -186,10 +224,28 @@ fun AboutScreen(
                     AboutRow(
                         icon = Icons.Default.Description,
                         label = "Open Source Licenses",
+                        subtitle = "Third-party library licenses",
                         onClick = onNavigateToLicenses
+                    )
+                    HorizontalDivider(modifier = Modifier.padding(vertical = 8.dp))
+                    AboutRow(
+                        icon = Icons.Default.Code,
+                        label = "Source Code",
+                        subtitle = "github.com/springmusk026/Android-Native-Il2cppDumper",
+                        onClick = {
+                            context.startActivity(Intent(Intent.ACTION_VIEW, Uri.parse("https://github.com/springmusk026/Android-Native-Il2cppDumper")))
+                        }
                     )
                 }
             }
+
+            // Disclaimer
+            Text(
+                text = "This tool is intended for educational and research purposes only. Users are responsible for ensuring compliance with applicable laws.",
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                modifier = Modifier.padding(horizontal = 4.dp, vertical = 8.dp)
+            )
 
             Spacer(modifier = Modifier.height(16.dp))
         }
@@ -204,6 +260,27 @@ private fun SectionTitle(title: String) {
         color = MaterialTheme.colorScheme.primary,
         fontWeight = FontWeight.Bold
     )
+}
+
+@Composable
+private fun LicenseRow(icon: ImageVector, text: String) {
+    Row(
+        modifier = Modifier.padding(vertical = 2.dp),
+        verticalAlignment = Alignment.CenterVertically
+    ) {
+        Icon(
+            imageVector = icon,
+            contentDescription = null,
+            tint = MaterialTheme.colorScheme.onSurfaceVariant,
+            modifier = Modifier.size(16.dp)
+        )
+        Spacer(modifier = Modifier.width(8.dp))
+        Text(
+            text = text,
+            style = MaterialTheme.typography.bodySmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant
+        )
+    }
 }
 
 @Composable
