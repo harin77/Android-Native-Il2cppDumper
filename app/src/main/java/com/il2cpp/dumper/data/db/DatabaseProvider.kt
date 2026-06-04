@@ -13,7 +13,8 @@ object DatabaseProvider {
                 context.applicationContext,
                 AppDatabase::class.java,
                 "il2cpp_dumper.db"
-            ).build().also { database = it }
+            ).fallbackToDestructiveMigration(true)
+             .build().also { database = it }
         }
     }
 

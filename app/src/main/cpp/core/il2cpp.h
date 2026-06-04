@@ -31,6 +31,7 @@ public:
     virtual SectionHelper* getSectionHelper(int methodCount, int typeDefinitionsCount, int imageCount, int64_t metadataUsagesCount) = 0;
     virtual bool checkDump() = 0;
     virtual uint64_t getRVA(uint64_t pointer) = 0;
+    virtual bool checkProtection() { return false; }
 
     // Common Il2Cpp operations
     void setProperties(double version, int64_t metadataUsagesCount);
@@ -64,6 +65,7 @@ public:
     std::unordered_map<uint64_t, uint64_t> methodSpecGenericMethodPointers; // methodSpec hash -> pointer
     std::unordered_map<std::string, Il2CppCodeGenModule> codeGenModules;
     std::unordered_map<std::string, std::vector<uint64_t>> codeGenModuleMethodPointers;
+    std::unordered_map<std::string, std::unordered_map<uint32_t, std::vector<Il2CppRGCTXDefinition>>> rgctxsDictionary;
     bool isDumped = false;
 
 protected:
@@ -92,6 +94,7 @@ public:
     SectionHelper* getSectionHelper(int methodCount, int typeDefinitionsCount, int imageCount, int64_t metadataUsagesCount) override;
     bool checkDump() override;
     uint64_t getRVA(uint64_t pointer) override;
+    bool checkProtection() override;
 
 private:
     ElfBase* elfParser = nullptr;

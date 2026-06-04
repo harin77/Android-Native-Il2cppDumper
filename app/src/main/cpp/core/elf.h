@@ -29,6 +29,7 @@ public:
     virtual uint64_t getRVA(uint64_t pointer) = 0;
 
     bool isDumped = false;
+    bool isProtected = false;
     void reload() { load(); }
     virtual void setMetadataUsagesCount(int64_t) {}
 

@@ -3,6 +3,8 @@
 
 namespace il2cpp_dumper {
 
+std::atomic<bool> g_cancelled{false};
+
 // Minimal JSON parser for the simple config format
 // The config JSON looks like:
 // {"DumpMethod":true,"DumpField":true,...}

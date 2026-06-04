@@ -1,6 +1,7 @@
 #include "struct_generator.h"
 #include "header_constants.h"
 #include "il2cpp_constants.h"
+#include "config.h"
 #include <fstream>
 #include <sstream>
 #include <algorithm>
@@ -68,6 +69,7 @@ void StructGenerator::writeScript(const std::string& outputDir) {
 
     // Process functions
     for (auto& imageDef : metadata.imageDefs) {
+        if (g_cancelled.load()) break;
         auto imageName = metadata.getStringFromIndex(imageDef.nameIndex);
         auto typeEnd = imageDef.typeStart + imageDef.typeCount;
         for (int typeIndex = imageDef.typeStart; typeIndex < typeEnd; typeIndex++) {
@@ -119,8 +121,98 @@ void StructGenerator::writeScript(const std::string& outputDir) {
                     sm.signature = signature;
                     json.scriptMethod.push_back(sm);
                 }
+
+                // Generic method instances
+                auto specIt = il2Cpp.methodDefinitionMethodSpecs.find(i);
+                if (specIt != il2Cpp.methodDefinitionMethodSpecs.end()) {
+                    for (auto& methodSpec : specIt->second) {
+                        uint64_t hash = static_cast<uint64_t>(methodSpec.methodDefinitionIndex) ^
+                                        (static_cast<uint64_t>(methodSpec.classIndexIndex) << 16) ^
+                                        (static_cast<uint64_t>(methodSpec.methodIndexIndex) << 32);
+                        auto ptrIt = il2Cpp.methodSpecGenericMethodPointers.find(hash);
+                        if (ptrIt == il2Cpp.methodSpecGenericMethodPointers.end() || ptrIt->second == 0) continue;
+                        ScriptMethod gsm;
+                        gsm.address = il2Cpp.getRVA(ptrIt->second);
+                        auto [specTypeName, specMethodName] = executor.getMethodSpecName(methodSpec, true);
+                        gsm.name = specTypeName + "$$" + specMethodName;
+                        gsm.signature = ""; // simplified
+                        json.scriptMethod.push_back(gsm);
+                    }
+                }
             }
         }
+    }
+
+    // Build Addresses array (all function pointers sorted/deduped)
+    {
+        std::vector<uint64_t> orderedPointers;
+        if (il2Cpp.version >= 24.2) {
+            for (auto& [name, ptrs] : il2Cpp.codeGenModuleMethodPointers)
+                orderedPointers.insert(orderedPointers.end(), ptrs.begin(), ptrs.end());
+        } else {
+            orderedPointers = il2Cpp.methodPointers;
+        }
+        orderedPointers.insert(orderedPointers.end(), il2Cpp.genericMethodPointers.begin(), il2Cpp.genericMethodPointers.end());
+        orderedPointers.insert(orderedPointers.end(), il2Cpp.invokerPointers.begin(), il2Cpp.invokerPointers.end());
+        if (il2Cpp.version < 29) {
+            orderedPointers.insert(orderedPointers.end(), executor.customAttributeGenerators.begin(), executor.customAttributeGenerators.end());
+        }
+        if (il2Cpp.version >= 22) {
+            orderedPointers.insert(orderedPointers.end(), il2Cpp.reversePInvokeWrappers.begin(), il2Cpp.reversePInvokeWrappers.end());
+            orderedPointers.insert(orderedPointers.end(), il2Cpp.unresolvedVirtualCallPointers.begin(), il2Cpp.unresolvedVirtualCallPointers.end());
+        }
+        std::sort(orderedPointers.begin(), orderedPointers.end());
+        orderedPointers.erase(std::unique(orderedPointers.begin(), orderedPointers.end()), orderedPointers.end());
+        orderedPointers.erase(std::remove(orderedPointers.begin(), orderedPointers.end(), 0ULL), orderedPointers.end());
+        json.addresses.reserve(orderedPointers.size());
+        for (auto p : orderedPointers) json.addresses.push_back(il2Cpp.getRVA(p));
+    }
+
+    // Process MetadataUsages for v16-26
+    if (il2Cpp.version > 16 && il2Cpp.version < 27) {
+        auto processUsage = [&](int usageType, auto handler) {
+            auto it = metadata.metadataUsageDic.find(usageType);
+            if (it == metadata.metadataUsageDic.end()) return;
+            for (auto& [destIdx, decodedIdx] : it->second) {
+                if (destIdx >= il2Cpp.metadataUsages.size()) continue;
+                auto addr = il2Cpp.metadataUsages[destIdx];
+                if (addr == 0) continue;
+                handler(decodedIdx, il2Cpp.getRVA(addr));
+            }
+        };
+        processUsage(1, [&](uint32_t idx, uint64_t rva) { // TypeInfo
+            if (idx >= il2Cpp.types.size()) return;
+            ScriptMetadata sm; sm.address = rva;
+            sm.name = executor.getTypeName(il2Cpp.types[idx], true, false) + "_TypeInfo";
+            json.scriptMetadata.push_back(sm);
+        });
+        processUsage(2, [&](uint32_t idx, uint64_t rva) { // Il2CppType
+            if (idx >= il2Cpp.types.size()) return;
+            ScriptMetadata sm; sm.address = rva;
+            sm.name = executor.getTypeName(il2Cpp.types[idx], true, false) + "_var";
+            json.scriptMetadata.push_back(sm);
+        });
+        processUsage(3, [&](uint32_t idx, uint64_t rva) { // MethodDef
+            if (idx >= metadata.methodDefs.size()) return;
+            auto& md = metadata.methodDefs[idx];
+            auto& td = metadata.typeDefs[md.declaringType];
+            ScriptMetadataMethod sm; sm.address = rva;
+            sm.name = "Method$" + executor.getTypeDefName(td, true, true) + "." + metadata.getStringFromIndex(md.nameIndex) + "()";
+            json.scriptMetadataMethod.push_back(sm);
+        });
+        processUsage(5, [&](uint32_t idx, uint64_t rva) { // StringLiteral
+            if (idx >= metadata.stringLiterals.size()) return;
+            ScriptString ss; ss.address = rva;
+            try { ss.value = metadata.getStringLiteralFromIndex(idx); } catch (...) { return; }
+            json.scriptString.push_back(ss);
+        });
+        processUsage(6, [&](uint32_t idx, uint64_t rva) { // MethodRef
+            if (idx >= il2Cpp.methodSpecs.size()) return;
+            auto [typeName, methodName] = executor.getMethodSpecName(il2Cpp.methodSpecs[idx], true);
+            ScriptMetadataMethod sm; sm.address = rva;
+            sm.name = "Method$" + typeName + "." + methodName + "()";
+            json.scriptMetadataMethod.push_back(sm);
+        });
     }
 
     // Write script.json
@@ -132,14 +224,42 @@ void StructGenerator::writeScript(const std::string& outputDir) {
         f << "{\n  \"ScriptMethod\": [\n";
         for (size_t i = 0; i < json.scriptMethod.size(); i++) {
             auto& m = json.scriptMethod[i];
-            f << "    {\"Address\": " << m.address << ", \"Name\": \"" << m.name
-              << "\", \"Signature\": \"" << m.signature << "\"}";
+            f << "    {\"Address\": " << m.address << ", \"Name\": \"" << m.name << "\"";
+            if (!m.signature.empty()) f << ", \"Signature\": \"" << m.signature << "\"";
+            f << "}";
             if (i + 1 < json.scriptMethod.size()) f << ",";
+            f << "\n";
+        }
+        f << "  ],\n  \"ScriptString\": [\n";
+        for (size_t i = 0; i < json.scriptString.size(); i++) {
+            f << "    {\"Address\": " << json.scriptString[i].address << ", \"Value\": \"" << json.scriptString[i].value << "\"}";
+            if (i + 1 < json.scriptString.size()) f << ",";
+            f << "\n";
+        }
+        f << "  ],\n  \"ScriptMetadata\": [\n";
+        for (size_t i = 0; i < json.scriptMetadata.size(); i++) {
+            auto& m = json.scriptMetadata[i];
+            f << "    {\"Address\": " << m.address << ", \"Name\": \"" << m.name << "\"}";
+            if (i + 1 < json.scriptMetadata.size()) f << ",";
+            f << "\n";
+        }
+        f << "  ],\n  \"ScriptMetadataMethod\": [\n";
+        for (size_t i = 0; i < json.scriptMetadataMethod.size(); i++) {
+            auto& m = json.scriptMetadataMethod[i];
+            f << "    {\"Address\": " << m.address << ", \"Name\": \"" << m.name << "\"}";
+            if (i + 1 < json.scriptMetadataMethod.size()) f << ",";
+            f << "\n";
+        }
+        f << "  ],\n  \"Addresses\": [\n";
+        for (size_t i = 0; i < json.addresses.size(); i++) {
+            f << "    " << json.addresses[i];
+            if (i + 1 < json.addresses.size()) f << ",";
             f << "\n";
         }
         f << "  ]\n}\n";
         f.close();
-        LOGI("script.json written: %zu methods", json.scriptMethod.size());
+        LOGI("script.json written: %zu methods, %zu metadata, %zu addresses",
+             json.scriptMethod.size(), json.scriptMetadata.size(), json.addresses.size());
     }
 
     // Write stringliteral.json
@@ -461,7 +581,64 @@ void StructGenerator::addVTableMethod(StructInfo& info, const Il2CppTypeDefiniti
     }
 }
 
-void StructGenerator::addRGCTX(StructInfo& /*info*/, const Il2CppTypeDefinition& /*typeDef*/) {}
+void StructGenerator::addRGCTX(StructInfo& info, const Il2CppTypeDefinition& typeDef) {
+    auto imgIt = typeDefImageNames.find(-1); // placeholder
+    std::string imageName;
+    // Find image name for this typeDef via its index
+    for (auto& [idx, name] : typeDefImageNames) {
+        // We stored it during createStructNameDic
+        if (metadata.typeDefs.data() + idx == &typeDef ||
+            (static_cast<size_t>(idx) < metadata.typeDefs.size() && &metadata.typeDefs[idx] == &typeDef)) {
+            imageName = name;
+            break;
+        }
+    }
+    if (imageName.empty()) return;
+
+    std::vector<Il2CppRGCTXDefinition>* collection = nullptr;
+    if (il2Cpp.version >= 24.2) {
+        auto dictIt = il2Cpp.rgctxsDictionary.find(imageName);
+        if (dictIt != il2Cpp.rgctxsDictionary.end()) {
+            auto tokenIt = dictIt->second.find(typeDef.token);
+            if (tokenIt != dictIt->second.end()) collection = &tokenIt->second;
+        }
+    } else if (typeDef.rgctxCount > 0) {
+        // For older versions, slice from metadata.rgctxEntries
+        static std::vector<Il2CppRGCTXDefinition> tempCollection;
+        tempCollection.assign(
+            metadata.rgctxEntries.begin() + typeDef.rgctxStartIndex,
+            metadata.rgctxEntries.begin() + typeDef.rgctxStartIndex + typeDef.rgctxCount);
+        collection = &tempCollection;
+    }
+    if (!collection) return;
+
+    for (auto& def : *collection) {
+        StructRGCTXInfo rgctxInfo;
+        auto rgctxType = def.getType();
+        rgctxInfo.type = rgctxType;
+        int32_t dataIndex = (il2Cpp.version >= 27.2)
+            ? static_cast<int32_t>(def._data) // simplified: would need mapVATR for v27.2+
+            : def.data.rgctxDataDummy;
+        switch (rgctxType) {
+            case Il2CppRGCTXDataType::IL2CPP_RGCTX_DATA_TYPE:
+                if (dataIndex >= 0 && static_cast<size_t>(dataIndex) < il2Cpp.types.size())
+                    rgctxInfo.typeName = fixName(executor.getTypeName(il2Cpp.types[dataIndex], true, false));
+                break;
+            case Il2CppRGCTXDataType::IL2CPP_RGCTX_DATA_CLASS:
+                if (dataIndex >= 0 && static_cast<size_t>(dataIndex) < il2Cpp.types.size())
+                    rgctxInfo.className = fixName(executor.getTypeName(il2Cpp.types[dataIndex], true, false));
+                break;
+            case Il2CppRGCTXDataType::IL2CPP_RGCTX_DATA_METHOD:
+                if (dataIndex >= 0 && static_cast<size_t>(dataIndex) < il2Cpp.methodSpecs.size()) {
+                    auto [tn, mn] = executor.getMethodSpecName(il2Cpp.methodSpecs[dataIndex], true);
+                    rgctxInfo.methodName = fixName(tn + "." + mn);
+                }
+                break;
+            default: break;
+        }
+        info.rgctxs.push_back(rgctxInfo);
+    }
+}
 void StructGenerator::parseArrayClassStruct(const Il2CppType& /*il2CppType*/, const Il2CppGenericContext* /*context*/) {}
 
 std::string StructGenerator::recursionStructInfo(StructInfo& info) {

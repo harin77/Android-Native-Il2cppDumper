@@ -18,5 +18,6 @@ object NativeDumper {
     external fun nativeGetVersion(): String
     external fun nativeIsDumpFile(): Boolean
     external fun nativeSetDumpAddress(address: Long)
+    external fun nativeCancel()
     external fun nativeCleanup()
 }

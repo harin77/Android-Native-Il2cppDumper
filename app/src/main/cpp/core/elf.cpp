@@ -96,6 +96,7 @@ void Elf::load() {
             relocationProcessing();
             if (checkProtection()) {
                 LOGI("WARNING: This file may be protected.");
+                isProtected = true;
             }
         }
     } else {
@@ -163,6 +164,7 @@ void Elf::load() {
             relocationProcessing();
             if (checkProtection()) {
                 LOGI("WARNING: This file may be protected.");
+                isProtected = true;
             }
         }
     }

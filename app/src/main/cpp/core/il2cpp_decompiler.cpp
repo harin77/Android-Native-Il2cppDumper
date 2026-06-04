@@ -1,6 +1,7 @@
 #include "il2cpp_decompiler.h"
 #include "il2cpp_constants.h"
 #include "custom_attribute_reader.h"
+#include "config.h"
 #include <fstream>
 #include <sstream>
 #include <algorithm>
@@ -39,10 +40,13 @@ void Il2CppDecompiler::decompile(const Config& config, const std::string& output
 
     // Dump types
     for (auto& imageDef : metadata.imageDefs) {
+        if (g_cancelled.load()) { writer << "// Dump cancelled\n"; break; }
         try {
             auto imageName = metadata.getStringFromIndex(imageDef.nameIndex);
             auto typeEnd = imageDef.typeStart + imageDef.typeCount;
             for (int typeDefIndex = imageDef.typeStart; typeDefIndex < typeEnd; typeDefIndex++) {
+                if (g_cancelled.load()) break;
+                try {
                 auto& typeDef = metadata.typeDefs[typeDefIndex];
                 std::vector<std::string> extends;
 
@@ -226,6 +230,9 @@ void Il2CppDecompiler::decompile(const Config& config, const std::string& output
                     }
                 }
                 writer << "}\n";
+                } catch (const std::exception& ex) {
+                    writer << "// Error processing type " << typeDefIndex << ": " << ex.what() << "\n}\n";
+                }
             }
         } catch (const std::exception& e) {
             LOGE("Error dumping: %s", e.what());

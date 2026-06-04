@@ -1,6 +1,8 @@
 #include <jni.h>
 #include <string>
 #include <cstdarg>
+#include <atomic>
+#include <mutex>
 #include <android/log.h>
 #include <android/asset_manager.h>
 #include <android/asset_manager_jni.h>
@@ -23,6 +25,7 @@ using namespace il2cpp_dumper;
 static Metadata* g_metadata = nullptr;
 static Il2CppEngine* g_il2Cpp = nullptr;
 static Config g_config;
+static std::mutex g_mutex;
 
 // JNI callback for logging
 static JavaVM* g_jvm = nullptr;
@@ -91,6 +94,9 @@ Java_com_il2cpp_dumper_NativeDumper_nativeInit(
     JNIEnv* env, jobject /* thiz */,
     jstring metadataPath, jstring il2cppPath) {
 
+    std::lock_guard<std::mutex> lock(g_mutex);
+    il2cpp_dumper::g_cancelled.store(false);
+
     // Clean up previous state
     delete g_metadata;
     delete g_il2Cpp;
@@ -155,6 +161,9 @@ Java_com_il2cpp_dumper_NativeDumper_nativeInit(
             bool isElf64 = (il2Bytes[4] == 2);
             g_il2Cpp = new ElfIl2Cpp(std::move(il2Bytes), isElf64);
             uiLog("ELF loaded: %s (%ld bytes)", isElf64 ? "64-bit" : "32-bit", il2Size);
+            if (g_il2Cpp->checkProtection()) {
+                uiLog("⚠️ WARNING: Binary may be protected/obfuscated. Results may be incomplete.");
+            }
         } else {
             uiLog("ERROR: Unsupported binary format (magic: 0x%08x)", magic);
             return JNI_FALSE;
@@ -356,10 +365,16 @@ Java_com_il2cpp_dumper_NativeDumper_nativeSetDumpAddress(
 
 JNIEXPORT void JNICALL
 Java_com_il2cpp_dumper_NativeDumper_nativeCleanup(JNIEnv* /* env */, jobject /* thiz */) {
+    std::lock_guard<std::mutex> lock(g_mutex);
     delete g_metadata;
     delete g_il2Cpp;
     g_metadata = nullptr;
     g_il2Cpp = nullptr;
+}
+
+JNIEXPORT void JNICALL
+Java_com_il2cpp_dumper_NativeDumper_nativeCancel(JNIEnv* /* env */, jobject /* thiz */) {
+    il2cpp_dumper::g_cancelled.store(true);
 }
 
 } // extern "C"

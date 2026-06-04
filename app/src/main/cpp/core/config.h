@@ -1,8 +1,11 @@
 #pragma once
 
 #include <string>
+#include <atomic>
 
 namespace il2cpp_dumper {
+
+extern std::atomic<bool> g_cancelled;
 
 struct Config {
     bool dumpMethod = true;

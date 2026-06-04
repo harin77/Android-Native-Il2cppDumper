@@ -366,6 +366,21 @@ void Il2CppEngine::init(uint64_t codeRegistration, uint64_t metadataRegistration
             } catch (...) {
                 codeGenModuleMethodPointers[moduleName].resize(codeGenModule.methodPointerCount, 0);
             }
+            // Build RGCTX dictionary
+            std::unordered_map<uint32_t, std::vector<Il2CppRGCTXDefinition>> rgctxDefDic;
+            if (codeGenModule.rgctxsCount > 0) {
+                auto rgctxs = readClassArray<Il2CppRGCTXDefinition>(
+                    mapVATR(codeGenModule.rgctxs), codeGenModule.rgctxsCount);
+                auto rgctxRanges = readClassArray<Il2CppTokenRangePair>(
+                    mapVATR(codeGenModule.rgctxRanges), codeGenModule.rgctxRangesCount);
+                for (auto& range : rgctxRanges) {
+                    std::vector<Il2CppRGCTXDefinition> defs(
+                        rgctxs.begin() + range.range.start,
+                        rgctxs.begin() + range.range.start + range.range.length);
+                    rgctxDefDic[range.token] = std::move(defs);
+                }
+            }
+            rgctxsDictionary[moduleName] = std::move(rgctxDefDic);
         }
     } else {
         methodPointers = readPointerArray(
@@ -513,6 +528,10 @@ bool ElfIl2Cpp::checkDump() {
 
 uint64_t ElfIl2Cpp::getRVA(uint64_t pointer) {
     return elfParser->getRVA(pointer);
+}
+
+bool ElfIl2Cpp::checkProtection() {
+    return elfParser->isProtected;
 }
 
 } // namespace il2cpp_dumper
