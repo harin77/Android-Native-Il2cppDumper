@@ -100,6 +100,9 @@ fun ConfigPanel(
                     ConfigSwitch("Force Dump", config.forceDump) {
                         onConfigChange(config.copy(forceDump = it))
                     }
+                    ConfigSwitch("No Redirected Pointer", config.noRedirectedPointer) {
+                        onConfigChange(config.copy(noRedirectedPointer = it))
+                    }
                     ConfigSwitch("Force Il2Cpp Version", config.forceIl2CppVersion) {
                         onConfigChange(config.copy(forceIl2CppVersion = it))
                     }

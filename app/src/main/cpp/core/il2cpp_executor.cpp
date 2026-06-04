@@ -26,7 +26,7 @@ Il2CppExecutor::Il2CppExecutor(Metadata& metadata, Il2CppEngine& il2Cpp)
             auto imageName = metadata.getStringFromIndex(imageDef.nameIndex);
             auto it = il2Cpp.codeGenModules.find(imageName);
             if (it != il2Cpp.codeGenModules.end() && imageDef.customAttributeCount > 0) {
-                auto pointers = il2Cpp.readPrimitiveArray<uint64_t>(
+                auto pointers = il2Cpp.readPointerArray(
                     il2Cpp.mapVATR(it->second.customAttributeCacheGenerator),
                     imageDef.customAttributeCount);
                 std::copy(pointers.begin(), pointers.end(),
@@ -158,7 +158,7 @@ std::string Il2CppExecutor::getTypeDefName(const Il2CppTypeDefinition& typeDef, 
 
 std::string Il2CppExecutor::getGenericInstParams(const Il2CppGenericInst& genericInst) {
     std::vector<std::string> names;
-    auto pointers = il2Cpp.readPrimitiveArray<uint64_t>(
+    auto pointers = il2Cpp.readPointerArray(
         il2Cpp.mapVATR(genericInst.type_argv), genericInst.type_argc);
     for (auto ptr : pointers) {
         auto idx = il2Cpp.getTypeIndex(ptr);

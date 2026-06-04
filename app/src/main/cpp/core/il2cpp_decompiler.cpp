@@ -19,6 +19,8 @@ void Il2CppDecompiler::decompile(const Config& config, const std::string& output
     LOGI("Dumping...");
     auto path = outputDir + "/dump.cs";
     std::ofstream writer(path, std::ios::binary);
+    char iobuf[65536];
+    writer.rdbuf()->pubsetbuf(iobuf, sizeof(iobuf));
     if (!writer.is_open()) {
         LOGE("Failed to open output file: %s", path.c_str());
         return;
@@ -275,10 +277,6 @@ std::string Il2CppDecompiler::getCustomAttribute(const Il2CppImageDefinition& im
 }
 
 std::string Il2CppDecompiler::getModifiers(const Il2CppMethodDefinition& methodDef) {
-    auto hash = methodDef.nameIndex; // Simple hash for cache
-    auto it = methodModifiers.find(hash);
-    if (it != methodModifiers.end()) return it->second;
-
     std::string str;
     auto access = methodDef.flags & METHOD_ATTRIBUTE_MEMBER_ACCESS_MASK;
     switch (access) {
@@ -305,7 +303,6 @@ std::string Il2CppDecompiler::getModifiers(const Il2CppMethodDefinition& methodD
     }
     if (methodDef.flags & METHOD_ATTRIBUTE_PINVOKE_IMPL) str += "extern ";
 
-    methodModifiers[hash] = str;
     return str;
 }
 

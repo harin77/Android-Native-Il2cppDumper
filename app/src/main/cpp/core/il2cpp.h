@@ -81,6 +81,7 @@ class ElfIl2Cpp : public Il2CppEngine {
 public:
     ElfIl2Cpp(const uint8_t* data, size_t size, bool isElf64);
     ElfIl2Cpp(std::vector<uint8_t>&& data, bool isElf64);
+    ~ElfIl2Cpp() override;
 
     uint64_t mapVATR(uint64_t addr) override;
     uint64_t mapRTVA(uint64_t addr) override;

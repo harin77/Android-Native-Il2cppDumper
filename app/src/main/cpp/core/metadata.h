@@ -86,10 +86,13 @@ private:
     std::unordered_map<int, Il2CppParameterDefaultValue> parameterDefaultValuesDic;
     std::unordered_map<uint32_t, std::string> stringCache;
 
+    void initialize();
+
     template<typename T>
     std::vector<T> readMetadataClassArray(uint32_t addr, int32_t size);
 
-    void processingMetadataUsage();
+    void processingMetadataUsage(const std::vector<Il2CppMetadataUsageList>& usageLists,
+                                 const std::vector<Il2CppMetadataUsagePair>& usagePairs);
 };
 
 } // namespace il2cpp_dumper

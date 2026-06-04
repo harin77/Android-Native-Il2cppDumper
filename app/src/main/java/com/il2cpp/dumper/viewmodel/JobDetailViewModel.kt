@@ -9,10 +9,12 @@ import com.il2cpp.dumper.data.db.DumpJobEntity
 import com.il2cpp.dumper.data.db.DatabaseProvider
 import com.il2cpp.dumper.data.repository.DumpJobRepository
 import com.il2cpp.dumper.util.ExportUtil
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 import java.io.File
 
 class JobDetailViewModel(
@@ -48,7 +50,9 @@ class JobDetailViewModel(
             return
         }
         viewModelScope.launch {
-            val uri = ExportUtil.saveFileToDownloads(context, sourceFile, fileName)
+            val uri = withContext(Dispatchers.IO) {
+                ExportUtil.saveFileToDownloads(context, sourceFile, fileName)
+            }
             _exportResult.value = if (uri != null) {
                 "Saved to Downloads/Il2CppDumper/$fileName"
             } else {
@@ -69,17 +73,18 @@ class JobDetailViewModel(
             val zipName = "${ExportUtil.generateJobFolderName(jobData.timestamp)}.zip"
             val cacheZip = File(context.cacheDir, "export/$zipName")
             cacheZip.parentFile?.mkdirs()
-            val zipFile = ExportUtil.createZipFromDirectory(outputDir, cacheZip)
-            if (zipFile != null) {
-                val uri = ExportUtil.saveFileToDownloads(context, zipFile, zipName)
-                _exportResult.value = if (uri != null) {
-                    "ZIP saved to Downloads/Il2CppDumper/$zipName"
-                } else {
-                    "Failed to save ZIP"
-                }
-                zipFile.delete()
+            val result = withContext(Dispatchers.IO) {
+                val zipFile = ExportUtil.createZipFromDirectory(outputDir, cacheZip)
+                if (zipFile != null) {
+                    val uri = ExportUtil.saveFileToDownloads(context, zipFile, zipName)
+                    zipFile.delete()
+                    uri
+                } else null
+            }
+            _exportResult.value = if (result != null) {
+                "ZIP saved to Downloads/Il2CppDumper/$zipName"
             } else {
-                _exportResult.value = "Failed to create ZIP"
+                "Failed to create/save ZIP"
             }
         }
     }
@@ -89,11 +94,15 @@ class JobDetailViewModel(
         val jobData = _job.value ?: return
         val outputDir = jobData.outputDirPath?.let { File(it) } ?: return
         val sourceFile = File(outputDir, fileName)
-        val intent = ExportUtil.shareFile(context, sourceFile, getMimeType(fileName))
-        if (intent != null) {
-            _shareIntent.value = Intent.createChooser(intent, "Share $fileName")
-        } else {
-            _exportResult.value = "Failed to share $fileName"
+        viewModelScope.launch {
+            val intent = withContext(Dispatchers.IO) {
+                ExportUtil.shareFile(context, sourceFile, getMimeType(fileName))
+            }
+            if (intent != null) {
+                _shareIntent.value = Intent.createChooser(intent, "Share $fileName")
+            } else {
+                _exportResult.value = "Failed to share $fileName"
+            }
         }
     }
 
@@ -106,12 +115,12 @@ class JobDetailViewModel(
             val zipName = "${ExportUtil.generateJobFolderName(jobData.timestamp)}.zip"
             val cacheZip = File(context.cacheDir, "export/$zipName")
             cacheZip.parentFile?.mkdirs()
-            val zipFile = ExportUtil.createZipFromDirectory(outputDir, cacheZip)
-            if (zipFile != null) {
-                val intent = ExportUtil.shareZip(context, zipFile)
-                if (intent != null) {
-                    _shareIntent.value = Intent.createChooser(intent, "Share dump files")
-                }
+            val intent = withContext(Dispatchers.IO) {
+                val zipFile = ExportUtil.createZipFromDirectory(outputDir, cacheZip)
+                zipFile?.let { ExportUtil.shareZip(context, it) }
+            }
+            if (intent != null) {
+                _shareIntent.value = Intent.createChooser(intent, "Share dump files")
             }
         }
     }

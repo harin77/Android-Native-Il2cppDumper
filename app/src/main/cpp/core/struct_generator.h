@@ -25,9 +25,10 @@ private:
     std::unordered_map<int, std::string> typeDefImageNames;
     std::unordered_set<std::string> structNameHashSet;
     std::vector<StructInfo> structInfoList;
-    std::unordered_map<std::string, StructInfo> structInfoWithStructName;
+    std::unordered_map<std::string, StructInfo*> structInfoWithStructName;
     std::unordered_set<size_t> structCache;
     std::unordered_map<int, std::string> structNameDic;
+    std::unordered_map<uint64_t, int> typeIdentityToIndex; // (nameIndex<<32|namespaceIndex) -> typeDefIndex
     std::unordered_map<uint64_t, std::string> genericClassStructNameDic;
     std::vector<uint64_t> genericClassList;
     std::ostringstream arrayClassHeader;
@@ -52,6 +53,7 @@ private:
     void addRGCTX(StructInfo& info, const Il2CppTypeDefinition& typeDef);
     void parseArrayClassStruct(const Il2CppType& il2CppType, const Il2CppGenericContext* context);
     std::string recursionStructInfo(StructInfo& info);
+    void recursionStructInfoToStream(StructInfo& info, std::ostream& out);
     void generateMethodInfo(const std::string& name, const std::string& typeName,
                             const std::vector<StructRGCTXInfo>& rgctxs);
     std::vector<StructRGCTXInfo> generateRGCTX(const std::string& imageName,

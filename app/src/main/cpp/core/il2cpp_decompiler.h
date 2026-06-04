@@ -18,7 +18,6 @@ private:
     Il2CppExecutor& executor;
     Metadata& metadata;
     Il2CppEngine& il2Cpp;
-    std::unordered_map<int, std::string> methodModifiers;
 
     std::string getCustomAttribute(const Il2CppImageDefinition& imageDef,
                                     int customAttributeIndex, uint32_t token,

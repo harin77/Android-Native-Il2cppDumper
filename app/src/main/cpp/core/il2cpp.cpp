@@ -243,7 +243,7 @@ void Il2CppEngine::init(uint64_t codeRegistration, uint64_t metadataRegistration
     }
 
     if (version == 27.1) {
-        auto pCodeGenModules = readPrimitiveArray<uint64_t>(
+        auto pCodeGenModules = readPointerArray(
             mapVATR(pCodeRegistration.codeGenModules), pCodeRegistration.codeGenModulesCount);
         for (auto pCodeGenModule : pCodeGenModules) {
             auto codeGenModule = readClass<Il2CppCodeGenModule>(mapVATR(pCodeGenModule));
@@ -268,35 +268,36 @@ void Il2CppEngine::init(uint64_t codeRegistration, uint64_t metadataRegistration
 
     pMetadataRegistration = readClass<Il2CppMetadataRegistration>(mapVATR(metadataRegistration));
 
-    genericMethodPointers = readPrimitiveArray<uint64_t>(
+    genericMethodPointers = readPointerArray(
         mapVATR(pCodeRegistration.genericMethodPointers), pCodeRegistration.genericMethodPointersCount);
-    invokerPointers = readPrimitiveArray<uint64_t>(
+    invokerPointers = readPointerArray(
         mapVATR(pCodeRegistration.invokerPointers), pCodeRegistration.invokerPointersCount);
 
     if (version < 27) {
-        customAttributeGenerators = readPrimitiveArray<uint64_t>(
+        customAttributeGenerators = readPointerArray(
             mapVATR(pCodeRegistration.customAttributeGenerators), pCodeRegistration.customAttributeCount);
     }
 
     if (version > 16 && version < 27) {
-        metadataUsages = readPrimitiveArray<uint64_t>(
+        metadataUsages = readPointerArray(
             mapVATR(pMetadataRegistration.metadataUsages), metadataUsagesCount);
     }
 
     if (version >= 22) {
         if (pCodeRegistration.reversePInvokeWrapperCount != 0)
-            reversePInvokeWrappers = readPrimitiveArray<uint64_t>(
+            reversePInvokeWrappers = readPointerArray(
                 mapVATR(pCodeRegistration.reversePInvokeWrappers), pCodeRegistration.reversePInvokeWrapperCount);
         if (pCodeRegistration.unresolvedVirtualCallCount != 0)
-            unresolvedVirtualCallPointers = readPrimitiveArray<uint64_t>(
+            unresolvedVirtualCallPointers = readPointerArray(
                 mapVATR(pCodeRegistration.unresolvedVirtualCallPointers), pCodeRegistration.unresolvedVirtualCallCount);
     }
 
-    genericInstPointers = readPrimitiveArray<uint64_t>(
+    genericInstPointers = readPointerArray(
         mapVATR(pMetadataRegistration.genericInsts), pMetadataRegistration.genericInstsCount);
     genericInsts.resize(genericInstPointers.size());
     for (size_t i = 0; i < genericInstPointers.size(); i++) {
-        genericInsts[i].read(*this, is32Bit);
+        setPosition(mapVATR(genericInstPointers[i]));
+        genericInsts[i].read(*this, version);
     }
 
     fieldOffsetsArePointers = version > 21;
@@ -306,7 +307,7 @@ void Il2CppEngine::init(uint64_t codeRegistration, uint64_t metadataRegistration
                                    fieldTest[3] == 0 && fieldTest[4] == 0 && fieldTest[5] > 0;
     }
     if (fieldOffsetsArePointers) {
-        fieldOffsets = readPrimitiveArray<uint64_t>(
+        fieldOffsets = readPointerArray(
             mapVATR(pMetadataRegistration.fieldOffsets), pMetadataRegistration.fieldOffsetsCount);
     } else {
         auto offsets32 = readPrimitiveArray<uint32_t>(
@@ -315,7 +316,7 @@ void Il2CppEngine::init(uint64_t codeRegistration, uint64_t metadataRegistration
         for (size_t i = 0; i < offsets32.size(); i++) fieldOffsets[i] = offsets32[i];
     }
 
-    auto pTypes = readPrimitiveArray<uint64_t>(
+    auto pTypes = readPointerArray(
         mapVATR(pMetadataRegistration.types), pMetadataRegistration.typesCount);
     LOGI("CRITICAL: is32Bit=%d, version=%.1f at types read", is32Bit, version);
     LOGI("pTypes array: addr=0x%llx, count=%lld",
@@ -352,14 +353,14 @@ void Il2CppEngine::init(uint64_t codeRegistration, uint64_t metadataRegistration
     LOGI("Types loaded: count=%lld, typeDic.size=%zu", (long long)pMetadataRegistration.typesCount, typeDic.size());
 
     if (version >= 24.2) {
-        auto pCodeGenModules = readPrimitiveArray<uint64_t>(
+        auto pCodeGenModules = readPointerArray(
             mapVATR(pCodeRegistration.codeGenModules), pCodeRegistration.codeGenModulesCount);
         for (auto pCodeGenModule : pCodeGenModules) {
             auto codeGenModule = readClass<Il2CppCodeGenModule>(mapVATR(pCodeGenModule));
             auto moduleName = readStringToNull(mapVATR(codeGenModule.moduleName));
             codeGenModules[moduleName] = codeGenModule;
             try {
-                auto methodPointers = readPrimitiveArray<uint64_t>(
+                auto methodPointers = readPointerArray(
                     mapVATR(codeGenModule.methodPointers), codeGenModule.methodPointerCount);
                 codeGenModuleMethodPointers[moduleName] = std::move(methodPointers);
             } catch (...) {
@@ -367,7 +368,7 @@ void Il2CppEngine::init(uint64_t codeRegistration, uint64_t metadataRegistration
             }
         }
     } else {
-        methodPointers = readPrimitiveArray<uint64_t>(
+        methodPointers = readPointerArray(
             mapVATR(pCodeRegistration.methodPointers), pCodeRegistration.methodPointersCount);
     }
 
@@ -449,6 +450,10 @@ ElfIl2Cpp::ElfIl2Cpp(const uint8_t* data, size_t size, bool isElf64)
 ElfIl2Cpp::ElfIl2Cpp(std::vector<uint8_t>&& data, bool isElf64)
     : Il2CppEngine(std::move(data), isElf64) {
     initElf();
+}
+
+ElfIl2Cpp::~ElfIl2Cpp() {
+    delete elfParser;
 }
 
 void ElfIl2Cpp::initElf() {

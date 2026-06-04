@@ -25,6 +25,8 @@ Extracts type definitions, method signatures, field offsets, and struct layouts 
 - **Configurable output** — toggle methods, fields, properties, attributes, offsets, and struct generation
 - **Force Il2Cpp version** — manually specify the Il2Cpp version for problematic binaries
 - **Struct generator** — produces Il2Cpp script JSON with struct definitions, vtables, and RGCTX info
+- **Force Dump mode** — treat binaries as memory dumps even when not auto-detected
+- **No Redirected Pointer** — skip ELF relocation reprocessing for dump files
 
 ### Job Management
 - **Job history** — all dump jobs are persisted in a local Room database with full metadata
@@ -54,7 +56,7 @@ Extracts type definitions, method signatures, field offsets, and struct layouts 
 ## Requirements
 
 - Android 8.0+ (API 26)
-- ARM64 device (arm64-v8a)
+- ARM64 device (arm64-v8a), armeabi-v7a, x86, x86_64
 - ~50MB free storage for output files
 
 ## Download

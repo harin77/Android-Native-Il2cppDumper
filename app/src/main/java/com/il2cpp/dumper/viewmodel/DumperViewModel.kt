@@ -28,7 +28,8 @@ data class DumpConfig(
     val generateStruct: Boolean = true,
     val forceIl2CppVersion: Boolean = false,
     val forceVersion: Double = 24.3,
-    val forceDump: Boolean = false
+    val forceDump: Boolean = false,
+    val noRedirectedPointer: Boolean = false
 ) {
     fun toJson(): String {
         val json = JSONObject()
@@ -43,6 +44,7 @@ data class DumpConfig(
         json.put("ForceIl2CppVersion", forceIl2CppVersion)
         json.put("ForceVersion", forceVersion)
         json.put("ForceDump", forceDump)
+        json.put("NoRedirectedPointer", noRedirectedPointer)
         json.put("GenerateDummyDll", false)
         return json.toString()
     }
@@ -142,14 +144,17 @@ class DumperViewModel(
 
             try {
                 // Copy files to internal storage
+                addLog("Loading files...")
                 val metaFile = copyUriToFile(metaUri, "global-metadata.dat")
                 val il2File = copyUriToFile(il2Uri, "libil2cpp.so")
+                addLog("├─ $metaFileName (${formatSize(metaFile.length())})")
+                addLog("└─ $il2FileName (${formatSize(il2File.length())})")
 
                 // Compute hashes
                 val metaHash = DumpJobRepository.computeFileHash(metaFile)
                 val il2Hash = DumpJobRepository.computeFileHash(il2File)
 
-                addLog("Initializing...")
+                addLog("Initializing native engine...")
                 val initResult = withContext(Dispatchers.IO) {
                     NativeDumper.nativeInit(metaFile.absolutePath, il2File.absolutePath)
                 }
@@ -159,23 +164,21 @@ class DumperViewModel(
                 }
 
                 val versionStr = NativeDumper.nativeGetVersion()
-                addLog("Version: $versionStr")
 
                 val isDump = withContext(Dispatchers.IO) { NativeDumper.nativeIsDumpFile() }
                 _isDumpFile.value = isDump
                 if (isDump) {
-                    addLog("Detected this may be a dump file.")
                     val addr = _dumpAddress.value
                     if (addr != null && addr != 0L) {
                         withContext(Dispatchers.IO) { NativeDumper.nativeSetDumpAddress(addr) }
                         addLog("Using dump address: 0x${addr.toString(16)}")
-                    } else {
-                        addLog("Set dump address via settings if needed, or continuing with auto-detect...")
                     }
                 }
 
                 _state.value = DumpState.Searching
-                addLog("Searching for registration structures...")
+                withContext(Dispatchers.IO) {
+                    NativeDumper.nativeSetConfig(_config.value.toJson())
+                }
                 val searchResult = withContext(Dispatchers.IO) {
                     NativeDumper.nativeSearch()
                 }
@@ -190,7 +193,7 @@ class DumperViewModel(
                 val jobOutputDir = File(context.filesDir, "jobs/$currentJobId")
                 jobOutputDir.mkdirs()
 
-                addLog("Dumping to ${jobOutputDir.absolutePath}...")
+                addLog("Dumping...")
                 val dumpResult = withContext(Dispatchers.IO) {
                     NativeDumper.nativeDump(jobOutputDir.absolutePath, _config.value.toJson())
                 }
@@ -219,13 +222,17 @@ class DumperViewModel(
                     )
                     repository.updateJob(entity)
                     _state.value = DumpState.Success(jobOutputDir.absolutePath, currentJobId)
-                    addLog("Done! (${duration}ms)")
+                    addLog("Done! ${outputFiles.size} file(s) in ${duration}ms")
                 } else {
                     failJob("Dump failed", startTime, metaFileName, il2FileName, metaHash, il2Hash, metaFile.length(), il2File.length(), duration)
                 }
             } catch (e: Exception) {
                 val duration = System.currentTimeMillis() - startTime
                 failJob(e.message ?: "Unknown error", startTime, metaFileName, il2FileName, null, null, 0, 0, duration)
+            } finally {
+                // Clean up temp files
+                File(context.cacheDir, "global-metadata.dat").delete()
+                File(context.cacheDir, "libil2cpp.so").delete()
             }
         }
     }
@@ -293,6 +300,12 @@ class DumperViewModel(
     private fun parseVersion(versionStr: String): Double? {
         val match = Regex("""[\d.]+""").find(versionStr)
         return match?.value?.toDoubleOrNull()
+    }
+
+    private fun formatSize(bytes: Long): String = when {
+        bytes >= 1_048_576 -> "%.1f MB".format(bytes / 1_048_576.0)
+        bytes >= 1024 -> "%.1f KB".format(bytes / 1024.0)
+        else -> "$bytes B"
     }
 
     fun reset() {

@@ -1,5 +1,6 @@
 #include <jni.h>
 #include <string>
+#include <cstdarg>
 #include <android/log.h>
 #include <android/asset_manager.h>
 #include <android/asset_manager_jni.h>
@@ -21,6 +22,7 @@ using namespace il2cpp_dumper;
 // Global state
 static Metadata* g_metadata = nullptr;
 static Il2CppEngine* g_il2Cpp = nullptr;
+static Config g_config;
 
 // JNI callback for logging
 static JavaVM* g_jvm = nullptr;
@@ -51,6 +53,17 @@ static void logCallback(const char* msg) {
     if (needsDetach) {
         g_jvm->DetachCurrentThread();
     }
+}
+
+// Log to both logcat and Java callback
+static void uiLog(const char* fmt, ...) {
+    char buf[1024];
+    va_list args;
+    va_start(args, fmt);
+    vsnprintf(buf, sizeof(buf), fmt, args);
+    va_end(args);
+    LOGI("%s", buf);
+    logCallback(buf);
 }
 
 extern "C" {
@@ -122,11 +135,15 @@ Java_com_il2cpp_dumper_NativeDumper_nativeInit(
     try {
         // Initialize metadata
         g_metadata = new Metadata(std::move(metaBytes));
-        LOGI("Metadata loaded: version=%.1f", g_metadata->version);
+        uiLog("Metadata version: %.1f", g_metadata->version);
+        uiLog("Images: %zu | Types: %zu | Methods: %zu",
+              g_metadata->imageDefs.size(), g_metadata->typeDefs.size(), g_metadata->methodDefs.size());
+        uiLog("Fields: %zu | Properties: %zu | Events: %zu",
+              g_metadata->fieldDefs.size(), g_metadata->propertyDefs.size(), g_metadata->eventDefs.size());
 
         // Determine il2cpp format
         if (il2Bytes.size() < 4) {
-            LOGE("Il2Cpp file too small");
+            uiLog("ERROR: Il2Cpp binary too small (%zu bytes)", il2Bytes.size());
             return JNI_FALSE;
         }
 
@@ -137,20 +154,38 @@ Java_com_il2cpp_dumper_NativeDumper_nativeInit(
             // Check ELF class
             bool isElf64 = (il2Bytes[4] == 2);
             g_il2Cpp = new ElfIl2Cpp(std::move(il2Bytes), isElf64);
-            LOGI("ELF %s loaded", isElf64 ? "64-bit" : "32-bit");
+            uiLog("ELF loaded: %s (%ld bytes)", isElf64 ? "64-bit" : "32-bit", il2Size);
         } else {
-            LOGE("Unsupported file format: 0x%08x", magic);
+            uiLog("ERROR: Unsupported binary format (magic: 0x%08x)", magic);
             return JNI_FALSE;
         }
 
         // Set properties
         g_il2Cpp->setProperties(g_metadata->version, g_metadata->metadataUsagesCount);
-        LOGI("Il2Cpp version: %.1f", g_il2Cpp->version);
 
         return JNI_TRUE;
     } catch (const std::exception& e) {
-        LOGE("Init error: %s", e.what());
+        uiLog("ERROR: Init failed - %s", e.what());
         return JNI_FALSE;
+    }
+}
+
+JNIEXPORT void JNICALL
+Java_com_il2cpp_dumper_NativeDumper_nativeSetConfig(JNIEnv* env, jobject /* thiz */, jstring configJson) {
+    if (!g_metadata || !g_il2Cpp) return;
+
+    const char* cfgJson = env->GetStringUTFChars(configJson, nullptr);
+    g_config = Config::fromJson(cfgJson);
+    env->ReleaseStringUTFChars(configJson, cfgJson);
+
+    if (g_config.forceIl2CppVersion) {
+        g_metadata->version = g_config.forceVersion;
+        g_il2Cpp->setProperties(g_config.forceVersion, g_metadata->metadataUsagesCount);
+        uiLog("Forced Il2Cpp version: %.1f", g_config.forceVersion);
+    }
+    if (g_config.forceDump) {
+        g_il2Cpp->isDumped = true;
+        uiLog("Force dump mode enabled");
     }
 }
 
@@ -168,13 +203,12 @@ Java_com_il2cpp_dumper_NativeDumper_nativeSearch(JNIEnv* env, jobject /* thiz */
         int typeDefCount = g_metadata->typeDefs.size();
         int imageCount = g_metadata->imageDefs.size();
 
-        LOGI("Search: methods=%d, types=%d, images=%d, version=%.1f",
-             methodCount, typeDefCount, imageCount, g_il2Cpp->version);
+        uiLog("Searching... (methods=%d, types=%d, images=%d)", methodCount, typeDefCount, imageCount);
 
         // Check if this is a dump file
         bool isDump = g_il2Cpp->checkDump();
         if (isDump) {
-            LOGI("Detected this may be a dump file. Setting isDumped=true.");
+            uiLog("Detected dump file (memory-dumped binary)");
             g_il2Cpp->isDumped = true;
         }
 
@@ -185,35 +219,55 @@ Java_com_il2cpp_dumper_NativeDumper_nativeSearch(JNIEnv* env, jobject /* thiz */
         auto metaReg = helper->findMetadataRegistration();
         delete helper;
 
-        LOGI("PlusSearch result: codeReg=0x%llx, metaReg=0x%llx",
-             (unsigned long long)codeReg, (unsigned long long)metaReg);
-
         if (codeReg != 0 && metaReg != 0) {
+            uiLog("PlusSearch: CodeRegistration=0x%llx, MetadataRegistration=0x%llx",
+                  (unsigned long long)codeReg, (unsigned long long)metaReg);
             found = g_il2Cpp->autoPlusInit(codeReg, metaReg);
+            if (found) uiLog("PlusSearch succeeded (version=%.1f)", g_il2Cpp->version);
+        } else {
+            uiLog("PlusSearch: not found (code=0x%llx, meta=0x%llx)",
+                  (unsigned long long)codeReg, (unsigned long long)metaReg);
         }
 
         if (!found) {
-            LOGI("Trying pattern search...");
+            uiLog("Trying pattern search...");
             found = g_il2Cpp->search();
             if (found) {
-                LOGI("Pattern search succeeded, running autoPlusInit");
+                uiLog("Pattern search found match, resolving registrations...");
                 helper = g_il2Cpp->getSectionHelper(methodCount, typeDefCount, imageCount);
                 codeReg = helper->findCodeRegistration();
                 metaReg = helper->findMetadataRegistration();
                 delete helper;
                 if (codeReg != 0 && metaReg != 0) {
                     found = g_il2Cpp->autoPlusInit(codeReg, metaReg);
+                    if (found) uiLog("Pattern search succeeded");
                 }
+            } else {
+                uiLog("Pattern search: no match");
             }
         }
 
         if (!found) {
-            LOGI("Trying symbol search...");
+            uiLog("Trying symbol search (il2cpp_codegen_register)...");
             found = g_il2Cpp->symbolSearch();
+            if (found) uiLog("Symbol search succeeded");
+            else uiLog("Symbol search: not found");
         }
 
         if (!found) {
-            LOGI("ERROR: All search methods failed");
+            uiLog("ERROR: All search methods failed. Cannot locate registration structures.");
+            return JNI_FALSE;
+        }
+
+        // Log final registration info
+        uiLog("Il2Cpp version: %.1f | Types loaded: %zu | GenericInsts: %zu",
+              g_il2Cpp->version, g_il2Cpp->types.size(), g_il2Cpp->genericInsts.size());
+
+        if (!g_il2Cpp->codeGenModules.empty()) {
+            uiLog("CodeGenModules: %zu", g_il2Cpp->codeGenModules.size());
+        }
+        if (!g_il2Cpp->methodPointers.empty()) {
+            uiLog("Method pointers: %zu", g_il2Cpp->methodPointers.size());
         }
 
         // For dump files with version >= 27, calculate ImageBase from type handles
@@ -223,16 +277,13 @@ Java_com_il2cpp_dumper_NativeDumper_nativeSearch(JNIEnv* env, jobject /* thiz */
             if (byvalTypeIndex >= 0 && static_cast<size_t>(byvalTypeIndex) < g_il2Cpp->types.size()) {
                 auto& il2CppType = g_il2Cpp->types[byvalTypeIndex];
                 g_metadata->imageBase = il2CppType.typeHandle() - g_metadata->header.typeDefinitionsOffset;
-                LOGI("Calculated ImageBase for dump: 0x%llx (typeHandle=0x%llx, offset=0x%x)",
-                     (unsigned long long)g_metadata->imageBase,
-                     (unsigned long long)il2CppType.typeHandle(),
-                     g_metadata->header.typeDefinitionsOffset);
+                uiLog("Dump ImageBase: 0x%llx", (unsigned long long)g_metadata->imageBase);
             }
         }
 
-        return found ? JNI_TRUE : JNI_FALSE;
+        return JNI_TRUE;
     } catch (const std::exception& e) {
-        LOGE("Search error: %s", e.what());
+        uiLog("ERROR: Search failed - %s", e.what());
         return JNI_FALSE;
     }
 }
@@ -247,6 +298,7 @@ Java_com_il2cpp_dumper_NativeDumper_nativeDump(
     const char* outDir = env->GetStringUTFChars(outputDir, nullptr);
     const char* cfgJson = env->GetStringUTFChars(configJson, nullptr);
 
+    std::string outDirStr(outDir);
     Config config = Config::fromJson(cfgJson);
 
     env->ReleaseStringUTFChars(outputDir, outDir);
@@ -256,18 +308,23 @@ Java_com_il2cpp_dumper_NativeDumper_nativeDump(
         Il2CppExecutor executor(*g_metadata, *g_il2Cpp);
 
         if (config.dumpMethod || config.dumpField || config.dumpProperty) {
+            uiLog("Decompiling %zu types to dump.cs...", g_metadata->typeDefs.size());
             Il2CppDecompiler decompiler(executor);
-            decompiler.decompile(config, outDir);
+            decompiler.decompile(config, outDirStr);
+            uiLog("dump.cs generated");
         }
 
         if (config.generateStruct) {
+            uiLog("Generating script.json + il2cpp.h...");
             StructGenerator gen(executor);
-            gen.writeScript(outDir);
+            gen.writeScript(outDirStr);
+            uiLog("Struct generation complete");
         }
 
+        uiLog("Output: %s", outDirStr.c_str());
         return JNI_TRUE;
     } catch (const std::exception& e) {
-        LOGE("Dump error: %s", e.what());
+        uiLog("ERROR: Dump failed - %s", e.what());
         return JNI_FALSE;
     }
 }

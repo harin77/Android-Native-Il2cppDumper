@@ -442,6 +442,15 @@ std::vector<T> Metadata::readMetadataClassArray(uint32_t addr, int32_t size) {
 
 Metadata::Metadata(const uint8_t* data, size_t size)
     : BinaryStream(data, size) {
+    initialize();
+}
+
+Metadata::Metadata(std::vector<uint8_t>&& data)
+    : BinaryStream(std::move(data)) {
+    initialize();
+}
+
+void Metadata::initialize() {
     auto sanity = readUInt32();
     if (sanity != 0xFAB11BAF) {
         throw std::runtime_error("ERROR: Metadata file supplied is not valid metadata file.");
@@ -492,11 +501,8 @@ Metadata::Metadata(const uint8_t* data, size_t size)
 
     auto fieldDefaultValues = readMetadataClassArray<Il2CppFieldDefaultValue>(header.fieldDefaultValuesOffset, header.fieldDefaultValuesSize);
     auto parameterDefaultValues = readMetadataClassArray<Il2CppParameterDefaultValue>(header.parameterDefaultValuesOffset, header.parameterDefaultValuesSize);
-
-    for (auto& fdv : fieldDefaultValues)
-        fieldDefaultValuesDic[fdv.fieldIndex] = fdv;
-    for (auto& pdv : parameterDefaultValues)
-        parameterDefaultValuesDic[pdv.parameterIndex] = pdv;
+    for (auto& fdv : fieldDefaultValues) fieldDefaultValuesDic[fdv.fieldIndex] = fdv;
+    for (auto& pdv : parameterDefaultValues) parameterDefaultValuesDic[pdv.parameterIndex] = pdv;
 
     propertyDefs = readMetadataClassArray<Il2CppPropertyDefinition>(header.propertiesOffset, header.propertiesSize);
     interfaceIndices = readPrimitiveArray<int32_t>(header.interfacesOffset, header.interfacesSize / 4);
@@ -513,7 +519,7 @@ Metadata::Metadata(const uint8_t* data, size_t size)
         if (version < 27) {
             auto metadataUsageLists = readMetadataClassArray<Il2CppMetadataUsageList>(header.metadataUsageListsOffset, header.metadataUsageListsCount);
             auto metadataUsagePairs = readMetadataClassArray<Il2CppMetadataUsagePair>(header.metadataUsagePairsOffset, header.metadataUsagePairsCount);
-            processingMetadataUsage();
+            processingMetadataUsage(metadataUsageLists, metadataUsagePairs);
         }
     }
 
@@ -541,113 +547,6 @@ Metadata::Metadata(const uint8_t* data, size_t size)
         }
     }
 
-    if (version <= 24.1) {
-        rgctxEntries = readMetadataClassArray<Il2CppRGCTXDefinition>(header.rgctxEntriesOffset, header.rgctxEntriesCount);
-    }
-
-    LOGI("Metadata loaded: version=%.1f, types=%zu, methods=%zu, images=%zu",
-         version, typeDefs.size(), methodDefs.size(), imageDefs.size());
-}
-
-Metadata::Metadata(std::vector<uint8_t>&& data)
-    : BinaryStream(std::move(data)) {
-    // Same initialization as above - delegated
-    auto sanity = readUInt32();
-    if (sanity != 0xFAB11BAF) {
-        throw std::runtime_error("ERROR: Metadata file supplied is not valid metadata file.");
-    }
-    auto ver = readInt32();
-    if (ver < 0 || ver > 1000) {
-        throw std::runtime_error("ERROR: Metadata file supplied is not valid metadata file.");
-    }
-    if (ver < 16 || ver > 31) {
-        throw std::runtime_error("ERROR: Metadata version not supported.");
-    }
-    version = ver;
-    header = readClass<Il2CppGlobalMetadataHeader>(0);
-
-    if (version == 24) {
-        if (header.stringLiteralOffset == 264) {
-            version = 24.2;
-            header = readClass<Il2CppGlobalMetadataHeader>(0);
-        } else {
-            imageDefs = readMetadataClassArray<Il2CppImageDefinition>(header.imagesOffset, header.imagesSize);
-            bool hasNonOneToken = false;
-            for (auto& img : imageDefs) {
-                if (img.token != 1) { hasNonOneToken = true; break; }
-            }
-            if (hasNonOneToken) version = 24.1;
-        }
-    }
-
-    imageDefs = readMetadataClassArray<Il2CppImageDefinition>(header.imagesOffset, header.imagesSize);
-    if (version == 24.2 && header.assembliesSize / 68 < static_cast<int>(imageDefs.size())) {
-        version = 24.4;
-    }
-    bool v241Plus = false;
-    if (version == 24.1 && header.assembliesSize / 64 == static_cast<int>(imageDefs.size())) {
-        v241Plus = true;
-    }
-    if (v241Plus) version = 24.4;
-
-    assemblyDefs = readMetadataClassArray<Il2CppAssemblyDefinition>(header.assembliesOffset, header.assembliesSize);
-    if (v241Plus) version = 24.1;
-
-    typeDefs = readMetadataClassArray<Il2CppTypeDefinition>(header.typeDefinitionsOffset, header.typeDefinitionsSize);
-    LOGI("typeDefs: offset=0x%x, size=%d, count=%zu", header.typeDefinitionsOffset, header.typeDefinitionsSize, typeDefs.size());
-    if (!typeDefs.empty()) {
-        LOGI("  typeDefs[0]: nameIndex=%u, namespaceIndex=%u, flags=0x%x",
-             typeDefs[0].nameIndex, typeDefs[0].namespaceIndex, typeDefs[0].flags);
-        auto firstName = readStringToNull(header.stringOffset + typeDefs[0].nameIndex);
-        LOGI("  typeDefs[0] name: '%s'", firstName.c_str());
-    }
-
-    methodDefs = readMetadataClassArray<Il2CppMethodDefinition>(header.methodsOffset, header.methodsSize);
-    parameterDefs = readMetadataClassArray<Il2CppParameterDefinition>(header.parametersOffset, header.parametersSize);
-    fieldDefs = readMetadataClassArray<Il2CppFieldDefinition>(header.fieldsOffset, header.fieldsSize);
-
-    auto fieldDefaultValues = readMetadataClassArray<Il2CppFieldDefaultValue>(header.fieldDefaultValuesOffset, header.fieldDefaultValuesSize);
-    auto parameterDefaultValues = readMetadataClassArray<Il2CppParameterDefaultValue>(header.parameterDefaultValuesOffset, header.parameterDefaultValuesSize);
-    for (auto& fdv : fieldDefaultValues) fieldDefaultValuesDic[fdv.fieldIndex] = fdv;
-    for (auto& pdv : parameterDefaultValues) parameterDefaultValuesDic[pdv.parameterIndex] = pdv;
-
-    propertyDefs = readMetadataClassArray<Il2CppPropertyDefinition>(header.propertiesOffset, header.propertiesSize);
-    interfaceIndices = readPrimitiveArray<int32_t>(header.interfacesOffset, header.interfacesSize / 4);
-    nestedTypeIndices = readPrimitiveArray<int32_t>(header.nestedTypesOffset, header.nestedTypesSize / 4);
-    eventDefs = readMetadataClassArray<Il2CppEventDefinition>(header.eventsOffset, header.eventsSize);
-    genericContainers = readMetadataClassArray<Il2CppGenericContainer>(header.genericContainersOffset, header.genericContainersSize);
-    genericParameters = readMetadataClassArray<Il2CppGenericParameter>(header.genericParametersOffset, header.genericParametersSize);
-    constraintIndices = readPrimitiveArray<int32_t>(header.genericParameterConstraintsOffset, header.genericParameterConstraintsSize / 4);
-    vtableMethods = readPrimitiveArray<uint32_t>(header.vtableMethodsOffset, header.vtableMethodsSize / 4);
-    stringLiterals = readMetadataClassArray<Il2CppStringLiteral>(header.stringLiteralOffset, header.stringLiteralSize);
-
-    if (version > 16) {
-        fieldRefs = readMetadataClassArray<Il2CppFieldRef>(header.fieldRefsOffset, header.fieldRefsSize);
-        if (version < 27) {
-            auto metadataUsageLists = readMetadataClassArray<Il2CppMetadataUsageList>(header.metadataUsageListsOffset, header.metadataUsageListsCount);
-            auto metadataUsagePairs = readMetadataClassArray<Il2CppMetadataUsagePair>(header.metadataUsagePairsOffset, header.metadataUsagePairsCount);
-            processingMetadataUsage();
-        }
-    }
-
-    if (version > 20 && version < 29) {
-        attributeTypeRanges = readMetadataClassArray<Il2CppCustomAttributeTypeRange>(header.attributesInfoOffset, header.attributesInfoCount);
-        attributeTypes = readPrimitiveArray<int32_t>(header.attributeTypesOffset, header.attributeTypesCount / 4);
-    }
-    if (version >= 29) {
-        attributeDataRanges = readMetadataClassArray<Il2CppCustomAttributeDataRange>(header.attributeDataRangeOffset, header.attributeDataRangeSize);
-    }
-    if (version > 24) {
-        for (size_t i = 0; i < imageDefs.size(); i++) {
-            std::unordered_map<uint32_t, int> dic;
-            auto end = imageDefs[i].customAttributeStart + imageDefs[i].customAttributeCount;
-            for (int j = imageDefs[i].customAttributeStart; j < end; j++) {
-                if (version >= 29) dic[attributeDataRanges[j].token] = j;
-                else dic[attributeTypeRanges[j].token] = j;
-            }
-            attributeTypeRangesDic[static_cast<int>(i)] = std::move(dic);
-        }
-    }
     if (version <= 24.1) {
         rgctxEntries = readMetadataClassArray<Il2CppRGCTXDefinition>(header.rgctxEntriesOffset, header.rgctxEntriesCount);
     }
@@ -714,12 +613,30 @@ uint32_t Metadata::getDecodedMethodIndex(uint32_t index) const {
     return index & 0x1FFFFFFFu;
 }
 
-void Metadata::processingMetadataUsage() {
+void Metadata::processingMetadataUsage(const std::vector<Il2CppMetadataUsageList>& usageLists,
+                                        const std::vector<Il2CppMetadataUsagePair>& usagePairs) {
     for (uint32_t i = 1; i <= 6; i++) {
         metadataUsageDic[static_cast<int>(i)] = {};
     }
-    // This is a simplified version - the full implementation needs metadataUsageLists and metadataUsagePairs
-    // which are read during construction
+    for (auto& usageList : usageLists) {
+        for (uint32_t i = 0; i < usageList.count; i++) {
+            auto offset = usageList.start + i;
+            if (offset >= usagePairs.size()) continue;
+            auto& pair = usagePairs[offset];
+            auto usage = getEncodedIndexType(pair.encodedSourceIndex);
+            auto decodedIndex = getDecodedMethodIndex(pair.encodedSourceIndex);
+            metadataUsageDic[static_cast<int>(usage)][pair.destinationIndex] = decodedIndex;
+        }
+    }
+    // Compute metadataUsagesCount as max destinationIndex + 1
+    uint32_t maxIndex = 0;
+    for (auto& [type, dic] : metadataUsageDic) {
+        if (!dic.empty()) {
+            auto lastKey = dic.rbegin()->first;
+            if (lastKey > maxIndex) maxIndex = lastKey;
+        }
+    }
+    metadataUsagesCount = static_cast<int64_t>(maxIndex) + 1;
 }
 
 } // namespace il2cpp_dumper

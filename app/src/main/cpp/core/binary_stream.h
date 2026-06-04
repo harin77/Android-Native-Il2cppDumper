@@ -102,6 +102,23 @@ public:
     template<typename T>
     T readPrimitive();
 
+    // Read an array of pointer-sized values, respecting is32Bit.
+    // Always returns uint64_t vector (widened from uint32_t on 32-bit).
+    std::vector<uint64_t> readPointerArray(int64_t count) {
+        std::vector<uint64_t> result(count);
+        if (is32Bit) {
+            for (int64_t i = 0; i < count; i++) result[i] = readUInt32();
+        } else {
+            for (int64_t i = 0; i < count; i++) result[i] = readUInt64();
+        }
+        return result;
+    }
+
+    std::vector<uint64_t> readPointerArray(uint64_t addr, int64_t count) {
+        setPosition(addr);
+        return readPointerArray(count);
+    }
+
     template<typename T>
     std::vector<T> readPrimitiveArray(int64_t count) {
         std::vector<T> result(count);

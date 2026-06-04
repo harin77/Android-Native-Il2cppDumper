@@ -110,7 +110,8 @@ fun HomeScreen(
             value = dumpAddrText,
             onValueChange = {
                 dumpAddrText = it
-                val addr = it.toLongOrNull(16) ?: 0L
+                val cleaned = it.trim().removePrefix("0x").removePrefix("0X")
+                val addr = cleaned.toLongOrNull(16) ?: 0L
                 viewModel.setDumpAddress(addr)
             },
             label = { Text("Dump Address (optional)") },

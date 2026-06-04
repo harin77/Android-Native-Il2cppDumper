@@ -4,6 +4,7 @@
 #include <fstream>
 #include <sstream>
 #include <algorithm>
+#include <map>
 #include <regex>
 #include <android/log.h>
 
@@ -40,6 +41,8 @@ std::string StructGenerator::fixName(const std::string& str) {
 void StructGenerator::writeScript(const std::string& outputDir) {
     LOGI("Generating struct info...");
     ScriptJson json;
+    json.scriptMethod.reserve(metadata.methodDefs.size());
+    structInfoList.reserve(metadata.typeDefs.size());
 
     // Create struct name dictionary
     for (size_t imageIndex = 0; imageIndex < metadata.imageDefs.size(); imageIndex++) {
@@ -78,10 +81,42 @@ void StructGenerator::writeScript(const std::string& outputDir) {
                 if (methodPointer > 0) {
                     ScriptMethod sm;
                     sm.address = il2Cpp.getRVA(methodPointer);
-                    sm.name = typeName + "$$" + metadata.getStringFromIndex(methodDef.nameIndex);
+                    auto methodName = metadata.getStringFromIndex(methodDef.nameIndex);
+                    sm.name = typeName + "$$" + methodName;
+
                     auto& returnType = il2Cpp.types[methodDef.returnType];
-                    sm.signature = executor.getTypeName(returnType, false, false) + " " +
-                                   fixName(sm.name) + "(const MethodInfo* method);";
+                    auto retStr = parseType(returnType);
+                    if (returnType.byref == 1) retStr += "*";
+
+                    std::string signature = retStr + " " + fixName(sm.name) + " (";
+                    std::vector<std::string> paramStrs;
+
+                    // __this parameter
+                    if (!(methodDef.flags & METHOD_ATTRIBUTE_STATIC)) {
+                        auto thisType = parseType(il2Cpp.types[typeDef.byvalTypeIndex]);
+                        paramStrs.push_back(thisType + " __this");
+                    } else if (il2Cpp.version <= 24) {
+                        paramStrs.push_back("Il2CppObject* __this");
+                    }
+
+                    // Method parameters
+                    for (int j = 0; j < methodDef.parameterCount; j++) {
+                        auto& paramDef = metadata.parameterDefs[methodDef.parameterStart + j];
+                        auto paramName = fixName(metadata.getStringFromIndex(paramDef.nameIndex));
+                        auto& paramType = il2Cpp.types[paramDef.typeIndex];
+                        auto paramCType = parseType(paramType);
+                        if (paramType.byref == 1) paramCType += "*";
+                        paramStrs.push_back(paramCType + " " + paramName);
+                    }
+
+                    paramStrs.push_back("const MethodInfo* method");
+
+                    for (size_t j = 0; j < paramStrs.size(); j++) {
+                        if (j > 0) signature += ", ";
+                        signature += paramStrs[j];
+                    }
+                    signature += ");";
+                    sm.signature = signature;
                     json.scriptMethod.push_back(sm);
                 }
             }
@@ -91,7 +126,9 @@ void StructGenerator::writeScript(const std::string& outputDir) {
     // Write script.json
     {
         auto path = outputDir + "/script.json";
-        std::ofstream f(path);
+        std::ofstream f(path, std::ios::binary);
+        char buf[65536];
+        f.rdbuf()->pubsetbuf(buf, sizeof(buf));
         f << "{\n  \"ScriptMethod\": [\n";
         for (size_t i = 0; i < json.scriptMethod.size(); i++) {
             auto& m = json.scriptMethod[i];
@@ -108,38 +145,88 @@ void StructGenerator::writeScript(const std::string& outputDir) {
     // Write stringliteral.json
     {
         auto path = outputDir + "/stringliteral.json";
-        std::ofstream f(path);
+        std::ofstream f(path, std::ios::binary);
+        char buf[65536];
+        f.rdbuf()->pubsetbuf(buf, sizeof(buf));
         f << "[\n";
-        for (size_t i = 0; i < metadata.stringLiterals.size(); i++) {
-            try {
-                auto value = metadata.getStringLiteralFromIndex(static_cast<uint32_t>(i));
-                f << "  {\"Value\": \"";
-                // Escape special chars
-                for (char c : value) {
-                    switch (c) {
-                        case '"': f << "\\\""; break;
-                        case '\\': f << "\\\\"; break;
-                        case '\n': f << "\\n"; break;
-                        case '\r': f << "\\r"; break;
-                        case '\t': f << "\\t"; break;
-                        default: f << c; break;
+
+        // Collect string literals with addresses from metadata usages
+        struct StringLiteralEntry { uint64_t address; std::string value; };
+        std::vector<StringLiteralEntry> entries;
+
+        if (il2Cpp.version > 16 && il2Cpp.version < 27) {
+            // Use metadataUsageDic for versions 16-26
+            auto it = metadata.metadataUsageDic.find(5); // kIl2CppMetadataUsageStringLiteral = 5
+            if (it != metadata.metadataUsageDic.end()) {
+                for (auto& [destIndex, decodedIndex] : it->second) {
+                    if (destIndex < il2Cpp.metadataUsages.size() &&
+                        decodedIndex < metadata.stringLiterals.size()) {
+                        auto address = il2Cpp.metadataUsages[destIndex];
+                        if (address > 0) {
+                            StringLiteralEntry entry;
+                            entry.address = il2Cpp.getRVA(address);
+                            try {
+                                entry.value = metadata.getStringLiteralFromIndex(decodedIndex);
+                            } catch (...) { continue; }
+                            entries.push_back(entry);
+                        }
                     }
                 }
-                f << "\", \"Address\": \"0x0\"}";
-                if (i + 1 < metadata.stringLiterals.size()) f << ",";
-                f << "\n";
-            } catch (...) {}
+            }
+        }
+
+        // Fallback: if no metadata usages found (v27+ or empty), dump all with index
+        if (entries.empty()) {
+            for (size_t i = 0; i < metadata.stringLiterals.size(); i++) {
+                try {
+                    StringLiteralEntry entry;
+                    entry.address = 0;
+                    entry.value = metadata.getStringLiteralFromIndex(static_cast<uint32_t>(i));
+                    entries.push_back(entry);
+                } catch (...) {}
+            }
+        }
+
+        for (size_t i = 0; i < entries.size(); i++) {
+            f << "  {\"value\": \"";
+            for (unsigned char c : entries[i].value) {
+                switch (c) {
+                    case '"': f << "\\\""; break;
+                    case '\\': f << "\\\\"; break;
+                    case '\n': f << "\\n"; break;
+                    case '\r': f << "\\r"; break;
+                    case '\t': f << "\\t"; break;
+                    case '\b': f << "\\b"; break;
+                    case '\f': f << "\\f"; break;
+                    default:
+                        if (c < 0x20) {
+                            char hex[8];
+                            snprintf(hex, sizeof(hex), "\\u%04x", c);
+                            f << hex;
+                        } else {
+                            f << static_cast<char>(c);
+                        }
+                        break;
+                }
+            }
+            if (entries[i].address > 0)
+                f << "\", \"address\": \"0x" << std::hex << entries[i].address << std::dec << "\"}";
+            else
+                f << "\", \"address\": \"0x0\"}";
+            if (i + 1 < entries.size()) f << ",";
+            f << "\n";
         }
         f << "]\n";
         f.close();
-        LOGI("stringliteral.json written: %zu literals, stringLiteralDataOffset=0x%x",
-             metadata.stringLiterals.size(), metadata.header.stringLiteralDataOffset);
+        LOGI("stringliteral.json written: %zu entries", entries.size());
     }
 
     // Write il2cpp.h
     {
         auto path = outputDir + "/il2cpp.h";
-        std::ofstream f(path);
+        std::ofstream f(path, std::ios::binary);
+        char buf[65536];
+        f.rdbuf()->pubsetbuf(buf, sizeof(buf));
         f << HeaderConstants::GenericHeader;
         auto ver = il2Cpp.version;
         if (ver == 22) f << HeaderConstants::HeaderV22;
@@ -154,43 +241,17 @@ void StructGenerator::writeScript(const std::string& outputDir) {
             return;
         }
 
-        // Write struct definitions
+        // Build lookup map and use RecursionStructInfo for proper ordering
         for (auto& info : structInfoList) {
-            // Fields struct
-            f << "struct " << info.typeName << "_Fields {\n";
-            for (auto& field : info.fields) {
-                f << "\t" << field.fieldTypeName << " " << field.fieldName << ";\n";
-            }
-            f << "};\n\n";
-
-            // Object struct
-            f << "struct " << info.typeName << "_o {\n";
-            if (!info.isValueType) {
-                f << "\tvoid* klass;\n";
-                f << "\tvoid* monitor;\n";
-            }
-            f << "\t" << info.typeName << "_Fields fields;\n";
-            f << "};\n\n";
-
-            // Static fields if any
-            if (!info.staticFields.empty()) {
-                f << "struct " << info.typeName << "_StaticFields {\n";
-                for (auto& field : info.staticFields) {
-                    f << "\t" << field.fieldTypeName << " " << field.fieldName << ";\n";
-                }
-                f << "};\n\n";
-            }
+            structInfoWithStructName[info.typeName + "_o"] = &info;
+        }
+        structCache.clear();
+        for (auto& info : structInfoList) {
+            recursionStructInfoToStream(info, f);
         }
 
         f.close();
-        LOGI("il2cpp.h written: %zu structs, structNameDic=%zu entries",
-             structInfoList.size(), structNameDic.size());
-        if (!structInfoList.empty()) {
-            LOGI("  First struct: '%s', fields=%zu, staticFields=%zu",
-                 structInfoList[0].typeName.c_str(),
-                 structInfoList[0].fields.size(),
-                 structInfoList[0].staticFields.size());
-        }
+        LOGI("il2cpp.h written: %zu structs", structInfoList.size());
     }
 
     LOGI("Struct generation complete");
@@ -255,14 +316,19 @@ std::string StructGenerator::getIl2CppStructName(const Il2CppType& il2CppType, c
     switch (il2CppType.type) {
         case Il2CppTypeEnum::IL2CPP_TYPE_VALUETYPE:
         case Il2CppTypeEnum::IL2CPP_TYPE_CLASS: {
-            auto typeDef = executor.getTypeDefinitionFromIl2CppType(il2CppType);
-            // Find the typeDefIndex by searching metadata.typeDefs
-            for (size_t i = 0; i < metadata.typeDefs.size(); i++) {
-                if (metadata.typeDefs[i].nameIndex == typeDef.nameIndex &&
-                    metadata.typeDefs[i].namespaceIndex == typeDef.namespaceIndex) {
-                    auto it = structNameDic.find(static_cast<int>(i));
+            if (il2Cpp.version >= 27 && il2Cpp.isDumped) {
+                auto typeDef = executor.getTypeDefinitionFromIl2CppType(il2CppType);
+                uint64_t key = (static_cast<uint64_t>(typeDef.nameIndex) << 32) | typeDef.namespaceIndex;
+                auto idxIt = typeIdentityToIndex.find(key);
+                if (idxIt != typeIdentityToIndex.end()) {
+                    auto nameIt = structNameDic.find(idxIt->second);
+                    if (nameIt != structNameDic.end()) return nameIt->second;
+                }
+            } else {
+                auto idx = il2CppType.klassIndex();
+                if (idx >= 0) {
+                    auto it = structNameDic.find(static_cast<int>(idx));
                     if (it != structNameDic.end()) return it->second;
-                    break;
                 }
             }
             return "System_Object";
@@ -297,6 +363,8 @@ void StructGenerator::createStructNameDic(const Il2CppTypeDefinition& typeDef, i
     auto typeStructName = fixName(typeName);
     auto uniqueName = getUniqueName(typeStructName);
     structNameDic[typeDefIndex] = uniqueName;
+    uint64_t key = (static_cast<uint64_t>(typeDef.nameIndex) << 32) | typeDef.namespaceIndex;
+    typeIdentityToIndex.emplace(key, typeDefIndex);
 }
 
 std::string StructGenerator::getUniqueName(const std::string& name) {
@@ -321,18 +389,33 @@ void StructGenerator::addStruct(const Il2CppTypeDefinition& typeDef, int typeDef
 }
 
 void StructGenerator::addGenericClassStruct(uint64_t /*pointer*/) {}
-void StructGenerator::addParents(const Il2CppTypeDefinition& /*typeDef*/, StructInfo& /*info*/) {}
+
+void StructGenerator::addParents(const Il2CppTypeDefinition& typeDef, StructInfo& info) {
+    if (!typeDef.isValueType() && !typeDef.isEnum()) {
+        if (typeDef.parentIndex >= 0) {
+            auto& parent = il2Cpp.types[typeDef.parentIndex];
+            if (parent.type != Il2CppTypeEnum::IL2CPP_TYPE_OBJECT) {
+                info.parent = getIl2CppStructName(parent);
+            }
+        }
+    }
+}
 
 void StructGenerator::addFields(const Il2CppTypeDefinition& typeDef, StructInfo& info, const Il2CppGenericContext* /*context*/) {
     if (typeDef.field_count > 0) {
         auto fieldEnd = typeDef.fieldStart + typeDef.field_count;
+        std::unordered_set<std::string> cache;
         for (int i = typeDef.fieldStart; i < fieldEnd; i++) {
             auto& fieldDef = metadata.fieldDefs[i];
             auto& fieldType = il2Cpp.types[fieldDef.typeIndex];
             if (fieldType.attrs & FIELD_ATTRIBUTE_LITERAL) continue;
             StructFieldInfo fi;
             fi.fieldTypeName = parseType(fieldType);
-            fi.fieldName = fixName(metadata.getStringFromIndex(fieldDef.nameIndex));
+            auto fieldName = fixName(metadata.getStringFromIndex(fieldDef.nameIndex));
+            if (!cache.insert(fieldName).second) {
+                fieldName = "_" + std::to_string(i - typeDef.fieldStart) + "_" + fieldName;
+            }
+            fi.fieldName = fieldName;
             fi.isValueType = isValueType(fieldType);
             fi.isCustomType = isCustomType(fieldType);
             if (fieldType.attrs & FIELD_ATTRIBUTE_STATIC)
@@ -343,10 +426,159 @@ void StructGenerator::addFields(const Il2CppTypeDefinition& typeDef, StructInfo&
     }
 }
 
-void StructGenerator::addVTableMethod(StructInfo& /*info*/, const Il2CppTypeDefinition& /*typeDef*/) {}
+void StructGenerator::addVTableMethod(StructInfo& info, const Il2CppTypeDefinition& typeDef) {
+    std::map<int, std::string> dic;
+    for (int i = 0; i < typeDef.vtable_count; i++) {
+        auto vTableIndex = typeDef.vtableStart + i;
+        if (static_cast<size_t>(vTableIndex) >= metadata.vtableMethods.size()) break;
+        auto encodedMethodIndex = metadata.vtableMethods[vTableIndex];
+        auto usage = Metadata::getEncodedIndexType(encodedMethodIndex);
+        auto index = metadata.getDecodedMethodIndex(encodedMethodIndex);
+        int32_t slot = -1;
+        std::string methodName;
+        if (usage == 6 && static_cast<size_t>(index) < il2Cpp.methodSpecs.size()) {
+            auto& methodSpec = il2Cpp.methodSpecs[index];
+            if (static_cast<size_t>(methodSpec.methodDefinitionIndex) < metadata.methodDefs.size()) {
+                auto& methodDef = metadata.methodDefs[methodSpec.methodDefinitionIndex];
+                slot = methodDef.slot;
+                methodName = fixName(metadata.getStringFromIndex(methodDef.nameIndex));
+            }
+        } else if (static_cast<size_t>(index) < metadata.methodDefs.size()) {
+            auto& methodDef = metadata.methodDefs[index];
+            slot = methodDef.slot;
+            methodName = fixName(metadata.getStringFromIndex(methodDef.nameIndex));
+        }
+        if (slot >= 0 && slot != 0xFFFF) {
+            dic[slot] = methodName;
+        }
+    }
+    if (!dic.empty()) {
+        int maxSlot = dic.rbegin()->first;
+        info.vTableMethod.resize(maxSlot + 1);
+        for (auto& [slot, name] : dic) {
+            info.vTableMethod[slot].methodName = name;
+        }
+    }
+}
+
 void StructGenerator::addRGCTX(StructInfo& /*info*/, const Il2CppTypeDefinition& /*typeDef*/) {}
 void StructGenerator::parseArrayClassStruct(const Il2CppType& /*il2CppType*/, const Il2CppGenericContext* /*context*/) {}
-std::string StructGenerator::recursionStructInfo(StructInfo& /*info*/) { return ""; }
+
+std::string StructGenerator::recursionStructInfo(StructInfo& info) {
+    std::ostringstream out;
+    recursionStructInfoToStream(info, out);
+    return out.str();
+}
+
+void StructGenerator::recursionStructInfoToStream(StructInfo& info, std::ostream& out) {
+    if (!structCache.insert(reinterpret_cast<size_t>(&info)).second) {
+        return;
+    }
+
+    // Resolve parent dependency first
+    if (!info.parent.empty()) {
+        auto parentKey = info.parent + "_o";
+        auto it = structInfoWithStructName.find(parentKey);
+        if (it != structInfoWithStructName.end()) {
+            recursionStructInfoToStream(*it->second, out);
+        }
+        out << "struct " << info.typeName << "_Fields : " << info.parent << "_Fields {\n";
+    } else {
+        out << "struct " << info.typeName << "_Fields {\n";
+    }
+
+    // Fields
+    for (auto& field : info.fields) {
+        if (field.isValueType) {
+            auto it = structInfoWithStructName.find(field.fieldTypeName);
+            if (it != structInfoWithStructName.end()) {
+                recursionStructInfoToStream(*it->second, out);
+            }
+        }
+        if (field.isCustomType)
+            out << "\tstruct " << field.fieldTypeName << " " << field.fieldName << ";\n";
+        else
+            out << "\t" << field.fieldTypeName << " " << field.fieldName << ";\n";
+    }
+    out << "};\n";
+
+    // RGCTXs
+    if (!info.rgctxs.empty()) {
+        out << "struct " << info.typeName << "_RGCTXs {\n";
+        for (size_t i = 0; i < info.rgctxs.size(); i++) {
+            auto& rgctx = info.rgctxs[i];
+            switch (rgctx.type) {
+                case Il2CppRGCTXDataType::IL2CPP_RGCTX_DATA_TYPE:
+                    out << "\tIl2CppType* _" << i << "_" << rgctx.typeName << ";\n"; break;
+                case Il2CppRGCTXDataType::IL2CPP_RGCTX_DATA_CLASS:
+                    out << "\tIl2CppClass* _" << i << "_" << rgctx.className << ";\n"; break;
+                case Il2CppRGCTXDataType::IL2CPP_RGCTX_DATA_METHOD:
+                    out << "\tMethodInfo* _" << i << "_" << rgctx.methodName << ";\n"; break;
+                default: break;
+            }
+        }
+        out << "};\n";
+    }
+
+    // VTable
+    if (!info.vTableMethod.empty()) {
+        out << "struct " << info.typeName << "_VTable {\n";
+        for (size_t i = 0; i < info.vTableMethod.size(); i++) {
+            out << "\tVirtualInvokeData _" << i << "_";
+            if (!info.vTableMethod[i].methodName.empty())
+                out << info.vTableMethod[i].methodName;
+            else
+                out << "unknown";
+            out << ";\n";
+        }
+        out << "};\n";
+    }
+
+    // Class metadata struct (_c)
+    out << "struct " << info.typeName << "_c {\n";
+    out << "\tIl2CppClass_1 _1;\n";
+    if (!info.staticFields.empty())
+        out << "\tstruct " << info.typeName << "_StaticFields* static_fields;\n";
+    else
+        out << "\tvoid* static_fields;\n";
+    if (!info.rgctxs.empty())
+        out << "\t" << info.typeName << "_RGCTXs* rgctx_data;\n";
+    else
+        out << "\tIl2CppRGCTXData* rgctx_data;\n";
+    out << "\tIl2CppClass_2 _2;\n";
+    if (!info.vTableMethod.empty())
+        out << "\t" << info.typeName << "_VTable vtable;\n";
+    else
+        out << "\tVirtualInvokeData vtable[32];\n";
+    out << "};\n";
+
+    // Object struct (_o)
+    out << "struct " << info.typeName << "_o {\n";
+    if (!info.isValueType) {
+        out << "\t" << info.typeName << "_c *klass;\n";
+        out << "\tvoid *monitor;\n";
+    }
+    out << "\t" << info.typeName << "_Fields fields;\n";
+    out << "};\n";
+
+    // Static fields struct
+    if (!info.staticFields.empty()) {
+        out << "struct " << info.typeName << "_StaticFields {\n";
+        for (auto& field : info.staticFields) {
+            if (field.isValueType) {
+                auto it = structInfoWithStructName.find(field.fieldTypeName);
+                if (it != structInfoWithStructName.end()) {
+                    recursionStructInfoToStream(*it->second, out);
+                }
+            }
+            if (field.isCustomType)
+                out << "\tstruct " << field.fieldTypeName << " " << field.fieldName << ";\n";
+            else
+                out << "\t" << field.fieldTypeName << " " << field.fieldName << ";\n";
+        }
+        out << "};\n";
+    }
+}
 void StructGenerator::generateMethodInfo(const std::string&, const std::string&, const std::vector<StructRGCTXInfo>&) {}
 std::vector<StructRGCTXInfo> StructGenerator::generateRGCTX(const std::string&, const Il2CppMethodDefinition&) { return {}; }
 std::string StructGenerator::getMethodTypeSignature(const std::vector<Il2CppTypeEnum>&) { return ""; }

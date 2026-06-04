@@ -86,7 +86,7 @@ uint64_t SectionHelper::findCodeRegistrationOld() {
                 try {
                     auto pointer = il2Cpp->mapVATR(il2Cpp->readUIntPtr());
                     if (checkPointerRangeDataRa(pointer)) {
-                        auto pointers = il2Cpp->readPrimitiveArray<uint64_t>(pointer, methodCount);
+                        auto pointers = il2Cpp->readPointerArray(pointer, methodCount);
                         if (checkPointerRangeExecVa(pointers)) {
                             return addr - section.offset + section.address;
                         }
@@ -111,7 +111,7 @@ uint64_t SectionHelper::findMetadataRegistrationOld() {
                     il2Cpp->setPosition(il2Cpp->getPosition() + ptrSize * 2);
                     auto pointer = il2Cpp->mapVATR(il2Cpp->readUIntPtr());
                     if (checkPointerRangeDataRa(pointer)) {
-                        auto pointers = il2Cpp->readPrimitiveArray<uint64_t>(pointer, metadataUsagesCount);
+                        auto pointers = il2Cpp->readPointerArray(pointer, metadataUsagesCount);
                         if (checkPointerRangeBssVa(pointers)) {
                             return addr - ptrSize * 12 - section.offset + section.address;
                         }
@@ -141,7 +141,7 @@ uint64_t SectionHelper::findMetadataRegistrationV21() {
                     try {
                         auto pointer = il2Cpp->mapVATR(il2Cpp->readUIntPtr());
                         if (checkPointerRangeDataRa(pointer)) {
-                            auto pointers = il2Cpp->readPrimitiveArray<uint64_t>(pointer, typeDefinitionsCount);
+                            auto pointers = il2Cpp->readPointerArray(pointer, typeDefinitionsCount);
                             bool flag = pointerInExec ? checkPointerRangeExecVa(pointers) : checkPointerRangeDataVa(pointers);
                             if (flag) {
                                 return addr - ptrSize * 10 - section.offset + section.address;
